@@ -150,7 +150,7 @@ async function refreshBalance() {
       return;
     }
 
-    let balanceText = `баланс: ${d.total_usdt.toFixed(2)} USDT (spot ${d.spot_usdt.toFixed(2)} + funding ${d.funding_usdt.toFixed(2)})`;
+    let balanceText = `баланс: ${Math.round(d.total_usdt)} USDT (spot ${Math.round(d.spot_usdt)} + funding ${Math.round(d.funding_usdt)})`;
 
     const openGap = lastPnlSummary ? lastPnlSummary.open_sell_remainder_usdt : 0;
     const openSurplus = lastPnlSummary ? lastPnlSummary.open_buy_surplus_usdt : 0;
@@ -159,7 +159,7 @@ async function refreshBalance() {
     if (openGap > 1) {
       // есть незакрытый долг по докупке с прошлой продажи - приоритет BUY, даже если на балансе что-то есть
       highlightSell = false;
-      balanceText += ` · не докуплено с прошлой продажи: ${openGap.toFixed(2)} USDT`;
+      balanceText += ` · не докуплено с прошлой продажи: ${Math.round(openGap)} USDT`;
     } else if (openSurplus > 1) {
       // куплено больше, чем продано - есть что продавать
       highlightSell = true;
