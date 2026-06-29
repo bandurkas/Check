@@ -15,7 +15,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 watcher = MarketWatcher(poll_interval=4.0)
 
 VPS_HOST = "root@187.127.114.34"
-PNL_REFRESH_SECONDS = 60
+PNL_REFRESH_SECONDS = 90
 pnl_cache = {"summary": None, "cycles": [], "updated_at": 0, "error": None}
 
 
