@@ -16,13 +16,37 @@ watcher = MarketWatcher(poll_interval=4.0)
 
 VPS_HOST = "root@187.127.114.34"
 PNL_REFRESH_SECONDS = 90
+BALANCE_REFRESH_SECONDS = 60
 pnl_cache = {"summary": None, "cycles": [], "updated_at": 0, "error": None}
+balance_cache = {"spot_usdt": None, "funding_usdt": None, "total_usdt": None, "updated_at": 0, "error": None}
 
 
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(watcher.run_forever())
     asyncio.create_task(pnl_refresh_loop())
+    asyncio.create_task(balance_refresh_loop())
+
+
+async def balance_refresh_loop():
+    while True:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ssh", VPS_HOST, "cd /root && python3 balance_remote.py",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode == 0:
+                data = json.loads(stdout.decode())
+                balance_cache.update(data)
+                balance_cache["updated_at"] = time.time()
+                balance_cache["error"] = None
+            else:
+                balance_cache["error"] = stderr.decode()[-500:]
+        except Exception as e:
+            balance_cache["error"] = str(e)
+        await asyncio.sleep(BALANCE_REFRESH_SECONDS)
 
 
 async def pnl_refresh_loop():
@@ -65,6 +89,11 @@ async def orderbook():
 @app.get("/api/pnl")
 async def pnl():
     return pnl_cache
+
+
+@app.get("/api/balance")
+async def balance():
+    return balance_cache
 
 
 @app.get("/", response_class=HTMLResponse)

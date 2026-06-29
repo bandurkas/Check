@@ -21,19 +21,25 @@
   .pnl-pos { color:#0ecb81; }
   .pnl-neg { color:#f6465d; }
   .updated { font-size:11px; color:#666; text-align:right; }
+  .card.dim { opacity:.35; }
+  .card.active { box-shadow:0 0 0 2px #f0b90b; }
+  .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:6px; background:#f0b90b; color:#000; font-weight:600; margin-left:6px; }
+  .balance-line { font-size:13px; color:#aaa; margin-bottom:10px; }
 </style>
 </head>
 <body>
   <h1>P2P USDT/IDR — Bank Transfer</h1>
 
+  <div class="balance-line" id="balance-line">баланс: —</div>
+
   <div class="grid">
-    <div class="card">
-      <h2>Выставить SELL (продать USDT) по</h2>
+    <div class="card" id="card-sell">
+      <h2>Выставить SELL (продать USDT) по <span id="badge-sell"></span></h2>
       <div class="price sell" id="rec-sell">—</div>
       <div class="spread" id="best-buy-ref"></div>
     </div>
-    <div class="card">
-      <h2>Выставить BUY (купить USDT) по</h2>
+    <div class="card" id="card-buy">
+      <h2>Выставить BUY (купить USDT) по <span id="badge-buy"></span></h2>
       <div class="price buy" id="rec-buy">—</div>
       <div class="spread" id="best-sell-ref"></div>
     </div>
@@ -121,9 +127,50 @@ async function refreshPnl() {
   }
 }
 
-refreshOrderbook(); refreshPnl();
+const BALANCE_THRESHOLD_USDT = 1; // ниже этого считаем, что USDT распродан
+
+async function refreshBalance() {
+  try {
+    const r = await fetch("/api/balance");
+    const d = await r.json();
+    const cardSell = document.getElementById("card-sell");
+    const cardBuy = document.getElementById("card-buy");
+    const badgeSell = document.getElementById("badge-sell");
+    const badgeBuy = document.getElementById("badge-buy");
+    const balanceLine = document.getElementById("balance-line");
+
+    if (d.error || d.total_usdt == null) {
+      balanceLine.textContent = "баланс: недоступен" + (d.error ? " (" + d.error.slice(0,80) + ")" : "");
+      cardSell.classList.remove("dim","active");
+      cardBuy.classList.remove("dim","active");
+      badgeSell.textContent = ""; badgeBuy.textContent = "";
+      return;
+    }
+
+    balanceLine.textContent = `баланс: ${d.total_usdt.toFixed(2)} USDT (spot ${d.spot_usdt.toFixed(2)} + funding ${d.funding_usdt.toFixed(2)})`;
+
+    if (d.total_usdt >= BALANCE_THRESHOLD_USDT) {
+      // держишь USDT -> актуально продавать
+      cardSell.classList.add("active"); cardSell.classList.remove("dim");
+      cardBuy.classList.add("dim"); cardBuy.classList.remove("active");
+      badgeSell.innerHTML = '<span class="badge">сейчас это</span>';
+      badgeBuy.innerHTML = "";
+    } else {
+      // USDT распродан -> актуально покупать обратно
+      cardBuy.classList.add("active"); cardBuy.classList.remove("dim");
+      cardSell.classList.add("dim"); cardSell.classList.remove("active");
+      badgeBuy.innerHTML = '<span class="badge">сейчас это</span>';
+      badgeSell.innerHTML = "";
+    }
+  } catch (e) {
+    document.getElementById("balance-line").textContent = "баланс: ошибка " + e;
+  }
+}
+
+refreshOrderbook(); refreshPnl(); refreshBalance();
 setInterval(refreshOrderbook, 4000);
 setInterval(refreshPnl, 90000);
+setInterval(refreshBalance, 60000);
 </script>
 </body>
 </html>
