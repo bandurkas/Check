@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P2P USDT/IDR Помощник</title>
+<style>
+  body { background:#0f1115; color:#e6e6e6; font-family:-apple-system,Segoe UI,Roboto,sans-serif; margin:0; padding:16px; }
+  h1 { font-size:18px; margin:0 0 12px; color:#f0b90b; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px; }
+  .card { background:#1a1d24; border-radius:10px; padding:14px; }
+  .card h2 { font-size:13px; color:#999; margin:0 0 6px; text-transform:uppercase; letter-spacing:.5px; }
+  .price { font-size:26px; font-weight:700; }
+  .buy { color:#0ecb81; }
+  .sell { color:#f6465d; }
+  .spread { font-size:13px; color:#999; margin-top:4px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:4px 6px; border-bottom:1px solid #262a33; }
+  th { color:#777; font-weight:500; }
+  .stale { color:#f6465d; font-size:12px; margin-top:8px; }
+  .pnl-pos { color:#0ecb81; }
+  .pnl-neg { color:#f6465d; }
+  .updated { font-size:11px; color:#666; text-align:right; }
+</style>
+</head>
+<body>
+  <h1>P2P USDT/IDR — Bank Transfer</h1>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Выставить SELL (продать USDT) по</h2>
+      <div class="price sell" id="rec-sell">—</div>
+      <div class="spread" id="best-buy-ref"></div>
+    </div>
+    <div class="card">
+      <h2>Выставить BUY (купить USDT) по</h2>
+      <div class="price buy" id="rec-buy">—</div>
+      <div class="spread" id="best-sell-ref"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <h2>Текущий спред рынка</h2>
+    <div id="spread-info">—</div>
+    <div class="stale" id="staleness"></div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Топ BUY-объявлений (где ты покупаешь)</h2>
+      <table id="buy-table"><thead><tr><th>Цена</th><th>Доступно</th><th>Мерчант</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="card">
+      <h2>Топ SELL-объявлений (где ты продаёшь)</h2>
+      <table id="sell-table"><thead><tr><th>Цена</th><th>Доступно</th><th>Мерчант</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>P&L (по истории сделок Binance, обновляется раз в минуту)</h2>
+    <div id="pnl-summary">—</div>
+    <table id="pnl-table"><thead><tr><th>Время</th><th>Сторона</th><th>Кол-во USDT</th><th>Курс</th><th>Сумма IDR</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div class="updated" id="last-update"></div>
+
+<script>
+function fmt(n) { return n == null ? "—" : Number(n).toLocaleString("id-ID"); }
+function fmtTime(ms) { return new Date(ms).toLocaleString("ru-RU"); }
+
+async function refreshOrderbook() {
+  try {
+    const r = await fetch("/api/orderbook");
+    const d = await r.json();
+    document.getElementById("rec-sell").textContent = d.recommended.sell_usdt_at ? "Rp " + fmt(d.recommended.sell_usdt_at) : "—";
+    document.getElementById("rec-buy").textContent = d.recommended.buy_usdt_at ? "Rp " + fmt(d.recommended.buy_usdt_at) : "—";
+    document.getElementById("best-buy-ref").textContent = "топ конкурента: Rp " + fmt(d.best_buy_price);
+    document.getElementById("best-sell-ref").textContent = "топ конкурента: Rp " + fmt(d.best_sell_price);
+    document.getElementById("spread-info").textContent =
+      d.spread_idr != null ? `Rp ${fmt(d.spread_idr)} (${d.spread_pct.toFixed(3)}%)` : "нет данных";
+
+    const ageSec = (Date.now()/1000 - d.timestamp);
+    const staleEl = document.getElementById("staleness");
+    if (ageSec > 20) {
+      staleEl.textContent = `⚠ данные устарели (${ageSec.toFixed(0)}с) — проверь, что Opera с открытой вкладкой Binance запущена`;
+    } else {
+      staleEl.textContent = "";
+    }
+
+    const buyBody = document.querySelector("#buy-table tbody");
+    buyBody.innerHTML = d.buy_ads.map(a => `<tr><td>${fmt(a.price)}</td><td>${a.available.toFixed(0)}</td><td>${a.merchant}</td></tr>`).join("");
+    const sellBody = document.querySelector("#sell-table tbody");
+    sellBody.innerHTML = d.sell_ads.map(a => `<tr><td>${fmt(a.price)}</td><td>${a.available.toFixed(0)}</td><td>${a.merchant}</td></tr>`).join("");
+
+    document.getElementById("last-update").textContent = "обновлено: " + new Date().toLocaleTimeString("ru-RU");
+  } catch (e) {
+    document.getElementById("staleness").textContent = "⚠ backend недоступен: " + e;
+  }
+}
+
+async function refreshPnl() {
+  try {
+    const r = await fetch("/api/pnl");
+    const d = await r.json();
+    if (d.error) {
+      document.getElementById("pnl-summary").textContent = "Ошибка получения P&L: " + d.error;
+      return;
+    }
+    if (!d.summary) { return; }
+    const s = d.summary;
+    const cls = s.realized_pnl_idr >= 0 ? "pnl-pos" : "pnl-neg";
+    document.getElementById("pnl-summary").innerHTML =
+      `Сделок: ${s.total_trades} (buy ${s.buy_trades} / sell ${s.sell_trades}) · завершённых циклов: ${s.matched_cycles} · ` +
+      `Реализованный P&L: <span class="${cls}">Rp ${fmt(s.realized_pnl_idr)}</span>`;
+    const body = document.querySelector("#pnl-table tbody");
+    body.innerHTML = d.cycles.slice().reverse().map(c =>
+      `<tr><td>${fmtTime(c.time)}</td><td>${c.side}</td><td>${c.amount}</td><td>${fmt(c.unit_price)}</td><td>${fmt(c.total)}</td></tr>`
+    ).join("");
+  } catch (e) {
+    document.getElementById("pnl-summary").textContent = "⚠ ошибка: " + e;
+  }
+}
+
+refreshOrderbook(); refreshPnl();
+setInterval(refreshOrderbook, 4000);
+setInterval(refreshPnl, 30000);
+</script>
+</body>
+</html>
