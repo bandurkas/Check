@@ -81,15 +81,19 @@ class PnLTracker:
                 if lot["amount"] <= 1e-9:
                     buy_queue.pop(0)
                     matched_cycles += 1
-            if remaining > 1e-9:
-                # sold more than bought via this bot - ignore the unmatched remainder
-                pass
+        total_buy_amount = sum(c["amount"] for c in buys)
+        total_sell_amount = sum(c["amount"] for c in sells)
+        # Positive => sold more than bought back yet (open "need to rebuy" gap).
+        # Negative => bought more than sold (holding spare USDT, free to sell).
+        open_sell_remainder = round(total_sell_amount - total_buy_amount, 4)
         return {
             "total_trades": len(self.cycles),
             "buy_trades": len(buys),
             "sell_trades": len(sells),
             "matched_cycles": matched_cycles,
             "realized_pnl_idr": round(realized_pnl, 2),
+            "open_sell_remainder_usdt": max(0.0, open_sell_remainder),
+            "open_buy_surplus_usdt": max(0.0, -open_sell_remainder),
         }
 
 

@@ -114,6 +114,7 @@ async function refreshPnl() {
     }
     if (!d.summary) { return; }
     const s = d.summary;
+    lastPnlSummary = s;
     const cls = s.realized_pnl_idr >= 0 ? "pnl-pos" : "pnl-neg";
     document.getElementById("pnl-summary").innerHTML =
       `Сделок: ${s.total_trades} (buy ${s.buy_trades} / sell ${s.sell_trades}) · завершённых циклов: ${s.matched_cycles} · ` +
@@ -128,6 +129,8 @@ async function refreshPnl() {
 }
 
 const BALANCE_THRESHOLD_USDT = 1; // ниже этого считаем, что USDT распродан
+
+let lastPnlSummary = null;
 
 async function refreshBalance() {
   try {
@@ -147,16 +150,32 @@ async function refreshBalance() {
       return;
     }
 
-    balanceLine.textContent = `баланс: ${d.total_usdt.toFixed(2)} USDT (spot ${d.spot_usdt.toFixed(2)} + funding ${d.funding_usdt.toFixed(2)})`;
+    let balanceText = `баланс: ${d.total_usdt.toFixed(2)} USDT (spot ${d.spot_usdt.toFixed(2)} + funding ${d.funding_usdt.toFixed(2)})`;
 
-    if (d.total_usdt >= BALANCE_THRESHOLD_USDT) {
-      // держишь USDT -> актуально продавать
+    const openGap = lastPnlSummary ? lastPnlSummary.open_sell_remainder_usdt : 0;
+    const openSurplus = lastPnlSummary ? lastPnlSummary.open_buy_surplus_usdt : 0;
+
+    let highlightSell;
+    if (openGap > 1) {
+      // есть незакрытый долг по докупке с прошлой продажи - приоритет BUY, даже если на балансе что-то есть
+      highlightSell = false;
+      balanceText += ` · не докуплено с прошлой продажи: ${openGap.toFixed(2)} USDT`;
+    } else if (openSurplus > 1) {
+      // куплено больше, чем продано - есть что продавать
+      highlightSell = true;
+    } else {
+      // нет открытого долга по истории - решаем по сырому балансу
+      highlightSell = d.total_usdt >= BALANCE_THRESHOLD_USDT;
+    }
+
+    balanceLine.textContent = balanceText;
+
+    if (highlightSell) {
       cardSell.classList.add("active"); cardSell.classList.remove("dim");
       cardBuy.classList.add("dim"); cardBuy.classList.remove("active");
       badgeSell.innerHTML = '<span class="badge">сейчас это</span>';
       badgeBuy.innerHTML = "";
     } else {
-      // USDT распродан -> актуально покупать обратно
       cardBuy.classList.add("active"); cardBuy.classList.remove("dim");
       cardSell.classList.add("dim"); cardSell.classList.remove("active");
       badgeBuy.innerHTML = '<span class="badge">сейчас это</span>';
