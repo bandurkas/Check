@@ -25,6 +25,8 @@
   .card.active { box-shadow:0 0 0 2px #f0b90b; }
   .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:6px; background:#f0b90b; color:#000; font-weight:600; margin-left:6px; }
   .balance-line { font-size:13px; color:#aaa; margin-bottom:10px; }
+  tr.mine { background:#2a2410; outline:1px solid #f0b90b; }
+  .my-rank { font-size:12px; color:#f0b90b; margin-top:6px; }
 </style>
 </head>
 <body>
@@ -55,10 +57,12 @@
     <div class="card">
       <h2>Топ BUY-объявлений (где ты покупаешь)</h2>
       <table id="buy-table"><thead><tr><th>Цена</th><th>Доступно</th><th>Мерчант</th></tr></thead><tbody></tbody></table>
+      <div class="my-rank" id="my-rank-in-buy-table"></div>
     </div>
     <div class="card">
       <h2>Топ SELL-объявлений (где ты продаёшь)</h2>
       <table id="sell-table"><thead><tr><th>Цена</th><th>Доступно</th><th>Мерчант</th></tr></thead><tbody></tbody></table>
+      <div class="my-rank" id="my-rank-in-sell-table"></div>
     </div>
   </div>
 
@@ -93,10 +97,21 @@ async function refreshOrderbook() {
       staleEl.textContent = "";
     }
 
+    const MY_NICKNAME = "bandurkas";
+    const rowHtml = a => {
+      const mine = (a.merchant || "").toLowerCase() === MY_NICKNAME;
+      return `<tr class="${mine ? 'mine' : ''}"><td>${fmt(a.price)}</td><td>${a.available.toFixed(0)}</td><td>${a.merchant}${mine ? ' ⭐' : ''}</td></tr>`;
+    };
     const buyBody = document.querySelector("#buy-table tbody");
-    buyBody.innerHTML = d.buy_ads.map(a => `<tr><td>${fmt(a.price)}</td><td>${a.available.toFixed(0)}</td><td>${a.merchant}</td></tr>`).join("");
+    buyBody.innerHTML = d.buy_ads.map(rowHtml).join("");
     const sellBody = document.querySelector("#sell-table tbody");
-    sellBody.innerHTML = d.sell_ads.map(a => `<tr><td>${fmt(a.price)}</td><td>${a.available.toFixed(0)}</td><td>${a.merchant}</td></tr>`).join("");
+    sellBody.innerHTML = d.sell_ads.map(rowHtml).join("");
+
+    // "buy-table" lists sell-side ads -> that's where MY SELL ad would appear.
+    // "sell-table" lists buy-side ads -> that's where MY BUY ad would appear.
+    const myRankText = (ad) => ad ? `Твоя заявка: ранг #${ad.rank} из ${ad.total}, цена ${fmt(ad.price)}, доступно ${ad.available.toFixed(0)} USDT` : "Твоей заявки сейчас не видно в этой стороне рынка";
+    document.getElementById("my-rank-in-buy-table").textContent = myRankText(d.my_sell_ad);
+    document.getElementById("my-rank-in-sell-table").textContent = myRankText(d.my_buy_ad);
 
     document.getElementById("last-update").textContent = "обновлено: " + new Date().toLocaleTimeString("ru-RU");
   } catch (e) {

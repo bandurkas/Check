@@ -24,6 +24,7 @@ balance_cache = {"spot_usdt": None, "funding_usdt": None, "total_usdt": None, "u
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(watcher.run_forever())
+    asyncio.create_task(watcher.run_my_ad_forever())
     asyncio.create_task(pnl_refresh_loop())
     asyncio.create_task(balance_refresh_loop())
 
@@ -83,6 +84,9 @@ async def orderbook():
         "recommended": snap.recommended_prices(),
         "buy_ads": snap.buy_ads[:10],
         "sell_ads": snap.sell_ads[:10],
+        "my_sell_ad": watcher.my_sell_ad,
+        "my_buy_ad": watcher.my_buy_ad,
+        "my_ads_updated_at": watcher.my_ads_updated_at,
     }
 
 
