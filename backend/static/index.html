@@ -71,6 +71,18 @@ body{
 }
 @keyframes klaxon-pulse{ 0%,100%{box-shadow:0 0 0px rgba(255,59,78,0)} 50%{box-shadow:0 0 22px rgba(255,59,78,.55)} }
 
+/* ---------- order-taken alert (15-min payment window) ---------- */
+.order-alert{ display:none; }
+.order-alert.show{
+  display:flex; flex-direction:column; gap:4px;
+  margin:0 0 14px; padding:12px 14px; border:1px solid var(--amber);
+  background:linear-gradient(180deg, rgba(255,179,0,.18), rgba(255,179,0,.06));
+  color:#ffe9b3; font-family:var(--disp); font-weight:700; letter-spacing:.04em;
+  font-size:14px; border-radius:3px;
+  animation:klaxon-pulse 1.1s ease-in-out infinite;
+}
+.order-alert .oa-row{ font-weight:400; font-size:12.5px; opacity:.85; text-transform:none; letter-spacing:normal; }
+
 /* ---------- panel shell w/ corner brackets ---------- */
 .panel{ position:relative; background:var(--bg-panel); border:1px solid var(--line); border-radius:2px; padding:16px; }
 .panel::before,.panel::after{ content:''; position:absolute; width:11px; height:11px; opacity:.9; }
@@ -84,7 +96,7 @@ body{
 
 /* ---------- advice panel ---------- */
 .advice{ margin-bottom:12px; --bracket:var(--ink-faint); transition:border-color .3s; }
-.advice.state-wide{ --bracket:var(--cyan); border-color:rgba(45,226,197,.35); }
+.advice.state-wide,.advice.state-floor{ --bracket:var(--cyan); border-color:rgba(45,226,197,.35); }
 .advice.state-push{ --bracket:var(--amber); border-color:rgba(255,179,0,.35); }
 .advice.state-debt,.advice.state-tight,.advice.state-trend{ --bracket:var(--red); border-color:rgba(255,59,78,.4); }
 .advice.state-urgent{ --bracket:var(--red); border-color:var(--red); animation:urgent-glow 1.3s ease-in-out infinite; }
@@ -174,6 +186,7 @@ footer{ text-align:center; font-family:var(--mono); font-size:10.5px; color:var(
   </div>
 
   <div class="klaxon" id="klaxon"></div>
+  <div class="order-alert" id="order-alert"></div>
 
   <section class="panel advice reveal" id="advice-panel" style="animation-delay:.05s">
     <div class="advice-top">
@@ -232,6 +245,7 @@ footer{ text-align:center; font-family:var(--mono); font-size:10.5px; color:var(
         <button id="bank-balance-save" data-i18n="save">Сохр.</button>
       </div>
       <div class="bank-check" id="bank-limit-check"></div>
+      <div class="bank-check" id="suggested-limits"></div>
     </div>
   </section>
 
@@ -287,6 +301,8 @@ const I18N = {
     ledger_title: "Журнал сделок",
     live: "live", stale: "устарело {s}с — проверь Opera", backend_down: "backend недоступен",
     klaxon: "⚠ Рынок {dir} против тебя — действуй сейчас",
+    order_alert_title: "💰 Заявку взяли — твоя очередь, 15 минут на перевод",
+    order_alert_row: "{type} · {amount} · {price} · {counterparty}",
     trend_stable: "рынок стабилен", trend_against: "рынок {dir} (~{speed} IDR/мин) — против тебя",
     trend_with: "рынок {dir} (~{speed} IDR/мин) — на твоей стороне",
     dir_up: "растёт", dir_down: "падает", dir_flat: "стабильно",
@@ -297,6 +313,7 @@ const I18N = {
     bank_available: "доступно: Rp {amt}",
     bank_over: "⚠ лимит (Rp {limit}) больше банка (Rp {bank})",
     bank_ok: "✓ лимит в пределах банка (Rp {bank})",
+    suggested_limits: "лимиты заявки → BUY {buyMin}–{buyMax} · SELL {sellMin}–{sellMax}",
     balance_unavailable: "недоступен{err}", balance_error: "ошибка {e}",
     ad_status_found: "ранг #{rank} из {total} · цена {price} · доступно {avail} USDT",
     ad_status_missing: "заявки сейчас не видно в этой стороне рынка",
@@ -326,6 +343,8 @@ const I18N = {
     ledger_title: "Trade ledger",
     live: "live", stale: "stale {s}s — check Opera", backend_down: "backend unreachable",
     klaxon: "⚠ Market {dir} against you — act now",
+    order_alert_title: "💰 Order taken — your turn, 15 minutes to transfer",
+    order_alert_row: "{type} · {amount} · {price} · {counterparty}",
     trend_stable: "market is flat", trend_against: "market {dir} (~{speed} IDR/min) — against you",
     trend_with: "market {dir} (~{speed} IDR/min) — in your favor",
     dir_up: "rising", dir_down: "falling", dir_flat: "flat",
@@ -336,6 +355,7 @@ const I18N = {
     bank_available: "available: Rp {amt}",
     bank_over: "⚠ limit (Rp {limit}) exceeds bank (Rp {bank})",
     bank_ok: "✓ limit within bank (Rp {bank})",
+    suggested_limits: "ad limits → BUY {buyMin}–{buyMax} · SELL {sellMin}–{sellMax}",
     balance_unavailable: "unavailable{err}", balance_error: "error {e}",
     ad_status_found: "rank #{rank} of {total} · price {price} · available {avail} USDT",
     ad_status_missing: "your ad isn't currently visible on this side of the market",
@@ -427,6 +447,33 @@ function playCoinSound(){
   }
 }
 
+/* ---------- order-taken alert (someone opened an order, 15min to pay) ----------
+   Deliberately distinct from playCoinSound (that one means "a trade finished
+   and money is real" - this one means "go to the bank app right now"), and
+   repeated 2-3 times with gaps since this is the one notification on the
+   whole dashboard with a hard clock attached to it. */
+function playOrderAlertSound(){
+  if(!audioCtx) return;
+  const now = audioCtx.currentTime;
+  const blip = (freq, t0, dur, type, peak) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+  };
+  for(let burst = 0; burst < 3; burst++){
+    const t0 = now + burst * 0.55;
+    blip(1320, t0, 0.16, "sawtooth", 0.22);
+    blip(880, t0 + 0.18, 0.16, "sawtooth", 0.22);
+  }
+}
+
 /* ---------- orderbook ---------- */
 async function refreshOrderbook(){
   try{
@@ -507,7 +554,7 @@ async function refreshAdvice(){
     window.activeSide = d.side;
 
     const panel = document.getElementById("advice-panel");
-    panel.classList.remove("state-push","state-trend","state-debt","state-tight","state-wide","state-urgent");
+    panel.classList.remove("state-push","state-trend","state-debt","state-tight","state-wide","state-floor","state-urgent");
     panel.classList.add("state-" + d.state);
     if(d.market_against) panel.classList.add("state-urgent");
 
@@ -709,6 +756,15 @@ function renderBankLimitCheck(){
     el.innerHTML = `<span class="pos">${t("bank_ok", {bank: fmt(bankBalanceIdr)})}</span>`;
   }
 }
+function renderSuggestedLimits(limits){
+  const el = document.getElementById("suggested-limits");
+  if(!limits){ el.textContent = ""; return; }
+  el.innerHTML = t("suggested_limits", {
+    buyMin: fmt(Math.round(limits.buy_min_idr)), buyMax: fmt(Math.round(limits.buy_max_idr)),
+    sellMin: limits.sell_min_idr != null ? fmt(Math.round(limits.sell_min_idr)) : "—",
+    sellMax: limits.sell_max_idr != null ? fmt(Math.round(limits.sell_max_idr)) : "—",
+  });
+}
 async function refreshBankBalance(){
   try{
     const r = await fetch("/api/bank-balance");
@@ -716,17 +772,20 @@ async function refreshBankBalance(){
     bankBalanceIdr = d.available_idr;
     document.getElementById("bank-balance-input").value = Math.round(bankBalanceIdr);
     renderBankLimitCheck();
+    renderSuggestedLimits(d.suggested_limits);
   } catch(e){}
 }
 document.getElementById("bank-balance-save").addEventListener("click", async () => {
   const val = parseFloat(document.getElementById("bank-balance-input").value);
   if(!val || val <= 0) return;
-  await fetch("/api/bank-balance", {
+  const r = await fetch("/api/bank-balance", {
     method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({available_idr: val}),
   });
+  const d = await r.json();
   bankBalanceIdr = val;
   renderBankLimitCheck();
+  renderSuggestedLimits(d.suggested_limits);
   refreshWorkSession();
 });
 
@@ -750,8 +809,34 @@ async function refreshWorkSession(){
   }
 }
 
+/* ---------- pending orders (someone took an ad - 15min to pay) ---------- */
+let openOrderAlerts = [];  // orders we've already shown, so reloading the page doesn't re-list stale ones forever
+async function refreshPendingOrders(){
+  try{
+    const r = await fetch("/api/pending-orders");
+    const d = await r.json();
+    if(d.new_orders && d.new_orders.length){
+      openOrderAlerts = openOrderAlerts.concat(d.new_orders);
+      playOrderAlertSound();
+    }
+    const el = document.getElementById("order-alert");
+    if(openOrderAlerts.length === 0){ el.classList.remove("show"); el.innerHTML = ""; return; }
+    el.classList.add("show");
+    let html = `<div>${t("order_alert_title")} <span style="float:right;cursor:pointer;opacity:.7" id="order-alert-dismiss">✕</span></div>`;
+    for(const o of openOrderAlerts){
+      html += `<div class="oa-row">${t("order_alert_row", {type: o.type_date, amount: o.amount, price: o.price, counterparty: o.counterparty})}</div>`;
+    }
+    el.innerHTML = html;
+    document.getElementById("order-alert-dismiss").addEventListener("click", () => {
+      openOrderAlerts = [];
+      el.classList.remove("show");
+      el.innerHTML = "";
+    });
+  } catch(e){}
+}
+
 /* ---------- boot ---------- */
-refreshOrderbook(); refreshAdvice(); refreshEarnings(); refreshPnl(); refreshBalance(); refreshBankBalance(); refreshWorkSession(); refreshAutoReprice(); refreshActiveSideOverride();
+refreshOrderbook(); refreshAdvice(); refreshEarnings(); refreshPnl(); refreshBalance(); refreshBankBalance(); refreshWorkSession(); refreshAutoReprice(); refreshActiveSideOverride(); refreshPendingOrders();
 setInterval(refreshOrderbook, 4000);
 setInterval(refreshAdvice, 10000);
 setInterval(refreshBalance, 60000);
@@ -760,6 +845,7 @@ setInterval(refreshEarnings, 90000);
 setInterval(refreshWorkSession, 90000);
 setInterval(refreshAutoReprice, 15000);
 setInterval(refreshActiveSideOverride, 15000);
+setInterval(refreshPendingOrders, 6000);
 </script>
 </body>
 </html>

@@ -59,11 +59,24 @@ class PnLTracker:
                     "amount": float(order["amount"]),
                     "unit_price": float(order["unitPrice"]),
                     "total": float(order["totalPrice"]),
+                    # Binance P2P commission, charged in the crypto asset on every
+                    # completed order regardless of side - invisible anywhere else
+                    # in the API/UI (~0.1%/leg, confirmed 2026-06-30 from this exact
+                    # field). Without it, FIFO profit looks real when it's often a
+                    # net loss once both legs' fees are counted.
+                    "commission": float(order.get("commission", 0) or 0),
                 }
                 self.cycles.append(trade)
                 new_trades.append(trade)
         self.cycles.sort(key=lambda t: t["time"])
         return new_trades
+
+    @staticmethod
+    def _fee_per_unit_idr(c):
+        """Commission for one trade, spread evenly across its units and
+        converted to IDR at that trade's own price - the only sane way to
+        blend a USDT-denominated fee into an IDR FIFO ledger."""
+        return (c.get("commission", 0.0) / c["amount"]) * c["unit_price"] if c["amount"] > 1e-9 else 0.0
 
     @staticmethod
     def _fifo_match(events):
@@ -72,21 +85,31 @@ class PnLTracker:
         (you can't fund a sale with USDT you haven't bought yet). Any sell amount
         left over once the queue runs dry was funded by untracked/pre-existing
         balance - no known cost basis, excluded from realized P&L rather than
-        wrongly matched against a future buy's price."""
+        wrongly matched against a future buy's price.
+
+        realized_pnl is net of both legs' Binance commission (see poll()) -
+        a price-only FIFO match looks profitable far more often than it
+        actually is once that's counted in."""
         buy_queue = []
         realized_pnl = 0.0
         matched_cycles = 0
         unmatched_sell_usdt = 0.0
         for c in events:
             if c["side"] == "BUY":
-                buy_queue.append({"amount": c["amount"], "unit_price": c["unit_price"]})
+                buy_queue.append({
+                    "amount": c["amount"], "unit_price": c["unit_price"],
+                    "fee_per_unit_idr": PnLTracker._fee_per_unit_idr(c),
+                })
             else:
                 remaining = c["amount"]
                 sell_unit = c["unit_price"]
+                sell_fee_per_unit = PnLTracker._fee_per_unit_idr(c)
                 while remaining > 1e-9 and buy_queue:
                     lot = buy_queue[0]
                     take = min(remaining, lot["amount"])
-                    realized_pnl += take * (sell_unit - lot["unit_price"])
+                    gross = take * (sell_unit - lot["unit_price"])
+                    fees = take * (lot["fee_per_unit_idr"] + sell_fee_per_unit)
+                    realized_pnl += gross - fees
                     lot["amount"] -= take
                     remaining -= take
                     if lot["amount"] <= 1e-9:
@@ -107,27 +130,35 @@ class PnLTracker:
         no price - the caller knows the live market price, this module doesn't.
         A SELL that outruns the buy queue gets unmatched_usdt>0 on top of the
         profit from whatever portion did match."""
-        buy_queue = []  # [{"row": dict, "amount": float, "unit_price": float}, ...]
+        buy_queue = []  # [{"row": dict, "amount": float, "unit_price": float, "fee_per_unit_idr": float}, ...]
         annotated = []
         for c in events:
             row = dict(c)
             if c["side"] == "BUY":
-                buy_queue.append({"row": row, "amount": c["amount"], "unit_price": c["unit_price"]})
+                buy_queue.append({
+                    "row": row, "amount": c["amount"], "unit_price": c["unit_price"],
+                    "fee_per_unit_idr": PnLTracker._fee_per_unit_idr(c),
+                })
                 row["profit_idr"] = None
                 row["unmatched_usdt"] = 0.0
                 row["open_usdt"] = 0.0
             else:
                 remaining = c["amount"]
                 sell_unit = c["unit_price"]
+                sell_fee_per_unit = PnLTracker._fee_per_unit_idr(c)
                 profit = 0.0
                 while remaining > 1e-9 and buy_queue:
                     lot = buy_queue[0]
                     take = min(remaining, lot["amount"])
-                    profit += take * (sell_unit - lot["unit_price"])
+                    gross = take * (sell_unit - lot["unit_price"])
+                    fees = take * (lot["fee_per_unit_idr"] + sell_fee_per_unit)
+                    profit += gross - fees
                     lot["amount"] -= take
                     remaining -= take
                     if lot["amount"] <= 1e-9:
                         buy_queue.pop(0)
+                # profit_idr is net of both legs' commission (see poll()/_fee_per_unit_idr) -
+                # the dashboard ledger shows real take-home, not a price-only mirage.
                 row["profit_idr"] = round(profit, 2)
                 row["unmatched_usdt"] = round(remaining, 4) if remaining > 1e-9 else 0.0
             annotated.append(row)

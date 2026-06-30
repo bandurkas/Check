@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 node_modules/
 requirements.txt.bak
+scripts/*.log

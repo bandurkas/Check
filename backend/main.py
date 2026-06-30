@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 from ad_repricer import AdRepricer
 from advisor import TREND_AGAINST_IDR_PER_MIN, compute_advice
 from market_watcher import MarketWatcher
+from order_watcher import OrderWatcher
 from pnl_tracker import PnLTracker
 
 app = FastAPI()
@@ -43,9 +44,17 @@ bank_balance_state = {"available_idr": 7_000_000.0, "updated_at": time.time()}
 work_sessions = [{"started_at": bank_balance_state["updated_at"],
                    "opening_balance_idr": bank_balance_state["available_idr"]}]
 
-AUTO_REPRICE_INTERVAL_SECONDS = 30
-AUTO_REPRICE_STATES = ("push", "trend", "debt", "tight", "neutral")  # states with an actionable recommended_price
+AUTO_REPRICE_INTERVAL_SECONDS = 60  # slower cadence on request 2026-07-01 - less tab churn, still responsive enough
+AUTO_REPRICE_STATES = ("push", "trend", "debt", "tight", "neutral", "floor")  # states with an actionable recommended_price
 repricer = AdRepricer()  # kill switch off by default - /api/auto-reprice POST to enable
+
+ORDER_WATCH_INTERVAL_SECONDS = 30  # orders have a 15-min payment window, this still gives ~14min worst-case lead
+order_watcher = OrderWatcher()
+# Separate kill switch from order_watcher itself - lets main.py stop opening
+# CDP tabs for this entirely (2026-07-01: the combination of this loop +
+# auto-reprice opening tabs back to back looked like the browser flailing,
+# even though each individual action was fine - paused on request).
+order_watch_state = {"enabled": True}
 
 
 @app.on_event("startup")
@@ -55,6 +64,40 @@ async def startup():
     asyncio.create_task(pnl_refresh_loop())
     asyncio.create_task(balance_refresh_loop())
     asyncio.create_task(auto_reprice_loop())
+    asyncio.create_task(order_watch_loop())
+
+
+async def order_watch_loop():
+    while True:
+        if order_watch_state["enabled"]:
+            await order_watcher.poll()
+        await asyncio.sleep(ORDER_WATCH_INTERVAL_SECONDS)
+
+
+@app.get("/api/order-watch")
+async def get_order_watch():
+    return order_watch_state
+
+
+@app.post("/api/order-watch")
+async def set_order_watch(request: Request):
+    body = await request.json()
+    order_watch_state["enabled"] = bool(body.get("enabled", False))
+    return order_watch_state
+
+
+@app.get("/api/pending-orders")
+async def pending_orders():
+    """Frontend polls this fast (faster than the main dashboard refresh) and
+    plays an alert sound on anything new - a taken order gives the paying
+    side 15 minutes, so this needs to surface well before that, not on the
+    next slow refresh cycle."""
+    return {
+        "new_orders": order_watcher.drain_new_orders(),
+        "pending_count": len(order_watcher.seen_order_numbers),
+        "last_poll_at": order_watcher.last_poll_at,
+        "error": order_watcher.last_error,
+    }
 
 
 def _update_debt_state(summary):
@@ -139,10 +182,23 @@ async def auto_reprice_loop():
     advisor card already tells the user to do by hand - only fires on the
     same actionable states/recommended_price the dashboard shows, never on
     its own separate judgment. AdRepricer enforces the actual safety bounds
-    (max delta, cooldown); this loop just decides *whether* to call it."""
+    (max delta, cooldown); this loop just decides *whether* to call it.
+
+    Two extra gates beyond repricer.enabled, both added 2026-07-01 after
+    review found has_pending() alone wasn't enough:
+    - order_watch_state["enabled"]: has_pending() only reflects reality while
+      something is actively polling for it. If order-watch is off, its last
+      reading is frozen and could be silently stale in either direction -
+      treat "not currently checking" as "can't confirm it's safe", not as
+      "assume nothing pending".
+    - pnl_cache["summary"] is not None: the cost-basis floor (advisor.py)
+      needs real P&L data to protect a SELL price; right after a backend
+      restart there's a gap before the first VPS poll succeeds where this
+      data is None and the floor is a silent no-op. Don't reprice blind."""
     while True:
         try:
-            if repricer.enabled:
+            pnl_ready = pnl_cache["summary"] is not None
+            if repricer.enabled and order_watch_state["enabled"] and pnl_ready and not order_watcher.has_pending():
                 inputs = _advice_inputs()
                 result = compute_advice(lang="ru", **inputs)
                 my_ad = inputs["my_ad"]
@@ -154,7 +210,9 @@ async def auto_reprice_loop():
                     and rec_price is not None
                     and abs(rec_price - my_ad["price"]) >= 1
                 ):
-                    ok, msg = await repricer.reprice(my_ad["adv_no"], my_ad["price"], rec_price)
+                    ok, msg = await repricer.reprice(
+                        my_ad["adv_no"], my_ad["price"], rec_price, is_pending_fn=order_watcher.has_pending,
+                    )
                     print(f"[auto_reprice] state={result['state']} ok={ok}: {msg}")
         except Exception as e:
             print(f"[auto_reprice] loop error: {e}")
@@ -237,9 +295,37 @@ async def balance():
     return balance_cache
 
 
+LIMIT_BUFFER_IDR = 1_000_000.0  # headroom kept below the full balance/inventory value
+
+
+def _suggested_limits():
+    """Min/max ad limits to set by hand on Binance (editing an ad's limits
+    isn't automated - only price is, via ad_repricer). Surfaced on the
+    dashboard instead of being recalculated by hand in chat every session
+    (2026-06-30 handoff item: 'BUY limits should always be suggested when
+    we open a session and Save the bank balance'). BUY is capped by IDR
+    cash on hand; SELL is capped by USDT actually held, valued at the
+    current realistic sell price - same convention /api/earnings uses."""
+    bank_idr = bank_balance_state["available_idr"]
+    buy_max = max(0.0, bank_idr - LIMIT_BUFFER_IDR)
+    buy_min = min(1_000_000.0, buy_max)
+
+    usdt = balance_cache.get("total_usdt")
+    price = watcher.latest.robust_sell_price
+    sell_value_idr = usdt * price if usdt is not None and price is not None else None
+    sell_max = max(0.0, sell_value_idr - LIMIT_BUFFER_IDR) if sell_value_idr is not None else None
+    sell_min = min(1_000_000.0, sell_max) if sell_max is not None else None
+
+    return {
+        "buy_min_idr": buy_min, "buy_max_idr": buy_max,
+        "sell_min_idr": sell_min, "sell_max_idr": sell_max,
+    }
+
+
 @app.get("/api/bank-balance")
 async def get_bank_balance():
-    return {**bank_balance_state, "session_started_at": work_sessions[-1]["started_at"]}
+    return {**bank_balance_state, "session_started_at": work_sessions[-1]["started_at"],
+            "suggested_limits": _suggested_limits()}
 
 
 @app.post("/api/bank-balance")
@@ -255,7 +341,8 @@ async def set_bank_balance(request: Request):
         prev["closed_at"] = bank_balance_state["updated_at"]
         prev.update(_compute_session_stats(prev["started_at"]))
         work_sessions.append({"started_at": bank_balance_state["updated_at"], "opening_balance_idr": amount})
-    return {**bank_balance_state, "session_started_at": work_sessions[-1]["started_at"]}
+    return {**bank_balance_state, "session_started_at": work_sessions[-1]["started_at"],
+            "suggested_limits": _suggested_limits()}
 
 
 @app.get("/api/work-sessions")
@@ -358,6 +445,8 @@ def _advice_inputs():
     market_trend = watcher.price_trend_idr_per_min(velocity_side)
     market_speed = abs(market_trend) if market_trend is not None else None
 
+    pnl_summary = pnl_cache.get("summary") or {}
+
     return {
         "active_side": active_side,
         "baseline_price": baseline_price,
@@ -370,6 +459,10 @@ def _advice_inputs():
         "minutes_since_fill": minutes_since_fill,
         "market_speed_idr_per_min": market_speed,
         "market_trend_idr_per_min": market_trend,
+        # Cost-basis floor (advisor.py) - never recommend selling currently-held
+        # inventory below what we actually paid for it.
+        "own_avg_cost_idr": pnl_summary.get("open_tracked_avg_cost_idr"),
+        "own_open_usdt": pnl_summary.get("open_tracked_usdt"),
     }
 
 

@@ -21,6 +21,8 @@ import time
 
 from playwright.async_api import async_playwright
 
+from focus_guard import FocusGuard
+
 CDP_URL = "http://localhost:9222"
 EDIT_URL = "https://p2p.binance.com/en/advEdit?code={adv_no}"
 MYADS_URL = "https://p2p.binance.com/en/myads?type=normal&code=default"
@@ -70,9 +72,17 @@ class AdRepricer:
                 return float(digits) if digits else None
         return None
 
-    async def reprice(self, adv_no: str, current_price: float, new_price: float):
+    async def reprice(self, adv_no: str, current_price: float, new_price: float, is_pending_fn=None):
         """Returns (ok, message). Never raises - callers run this from a
-        background loop that must keep going even if one attempt fails."""
+        background loop that must keep going even if one attempt fails.
+
+        is_pending_fn: optional zero-arg callable, re-checked right before
+        the Post click and right before the Confirm click - the caller's
+        own pending-order check (e.g. main.py's order_watcher.has_pending)
+        is only read once before this coroutine starts, and the whole flow
+        below can run for several real seconds; re-checking right at the
+        two points of no return narrows that gap instead of trusting a
+        check that's already stale by the time it matters."""
         if not self.enabled:
             return self._record(False, "disabled (kill switch off)")
         if not adv_no:
@@ -82,9 +92,11 @@ class AdRepricer:
             return self._record(False, f"refused: delta {delta:+.0f} IDR exceeds safety bound {self.max_delta_idr}")
         if not self._cooldown_ok(adv_no):
             return self._record(False, "cooldown active, skipping this cycle")
+        if is_pending_fn and is_pending_fn():
+            return self._record(False, "order appeared pending just before submit - aborted, nothing touched")
 
         try:
-            async with async_playwright() as p:
+            async with FocusGuard(), async_playwright() as p:
                 browser = await p.chromium.connect_over_cdp(CDP_URL)
                 ctx = browser.contexts[0]
                 page = await ctx.new_page()
@@ -103,6 +115,8 @@ class AdRepricer:
                     else:
                         return self._record(False, "Post stayed disabled after fill - aborted, nothing submitted")
 
+                    if is_pending_fn and is_pending_fn():
+                        return self._record(False, "order appeared pending right before Post - aborted, nothing submitted")
                     await post_btn.click()
 
                     confirm_btn = page.get_by_role("button", name="Confirm to post", exact=True)
@@ -116,6 +130,8 @@ class AdRepricer:
                             )
                         return self._record(False, "confirm modal never appeared after Post click - aborted")
 
+                    if is_pending_fn and is_pending_fn():
+                        return self._record(False, "order appeared pending right before Confirm - aborted, not submitted")
                     await confirm_btn.click()
                     await page.wait_for_timeout(1500)
 
@@ -125,19 +141,35 @@ class AdRepricer:
                             False, "verification challenge appeared after confirming - kill switch tripped, needs manual check"
                         )
 
+                    # The submission itself is done at this point - Confirm was clicked
+                    # and no 2FA prompt appeared, so Binance almost certainly has the
+                    # new price now. Set cooldown here, not after verification: a busy
+                    # browser (many CDP tabs at once) can make the verification nav
+                    # below time out on its own, and if cooldown only got set on a
+                    # clean verify, that flaky-but-harmless timeout was retriggering a
+                    # full repost every loop tick (2026-07-01 - looked like the bot
+                    # frantically hammering the price, when the price was actually fine).
+                    self._last_reprice_at[adv_no] = time.time()
+
                     # Ground-truth check, not "no error was thrown" - the only thing
-                    # that matters is what Binance actually has on file now.
-                    await page.goto(MYADS_URL, wait_until="domcontentloaded", timeout=15000)
+                    # that matters is what Binance actually has on file now. Generous
+                    # timeout since this runs after price/order tabs may already be open.
+                    await page.goto(MYADS_URL, wait_until="domcontentloaded", timeout=25000)
                     await page.wait_for_timeout(1500)
                     live_price = await self._read_live_price(page, adv_no)
                     if live_price is None:
                         return self._record(False, f"submitted but couldn't verify - {adv_no} not found in My Ads list")
                     if abs(live_price - new_price) > 0.5:
+                        # Unlike a flaky verification timeout (genuinely unknown outcome,
+                        # cooldown stays put above), a mismatch means we now know for a
+                        # fact the ad is wrong AND what the right price should be - no
+                        # reason to make the operator wait out the full cooldown to fix
+                        # a known-bad state instead of correcting it next loop tick.
+                        self._last_reprice_at.pop(adv_no, None)
                         return self._record(
                             False, f"submitted but verification mismatch: live={live_price:.0f} target={new_price:.0f}"
                         )
 
-                    self._last_reprice_at[adv_no] = time.time()
                     return self._record(True, f"{adv_no}: {current_price:.0f} -> {live_price:.0f} (verified)")
                 finally:
                     for closer in (page.close, browser.close):

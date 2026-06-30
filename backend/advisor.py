@@ -5,12 +5,26 @@ starting points per the design doc ("подбираются по факту") �
 once we have a few days of real observations, no need to touch main.py.
 """
 
+# Binance P2P charges ~0.1% commission in the crypto asset on EVERY completed
+# order, both legs (confirmed 2026-06-30 from the API's own `commission` field,
+# not visible anywhere in price/orderbook data) - a cost the advisor was
+# completely blind to until today. Across the 2026-06-30 session this ate
+# Rp 289,669 against Rp 171,278 of price-only "profit" - net real result was
+# a LOSS of about Rp 118,391, despite every individual FIFO match showing
+# positive. Most of that day's margin (avg ~12bps/cycle) never even reached
+# the ~20bps breakeven line below - it just looked like profit because
+# nothing upstream of this constant knew fees existed.
+FEE_PCT_PER_LEG = 0.1
+ROUND_TRIP_FEE_PCT = FEE_PCT_PER_LEG * 2
+
 RANK_OK_MAX = 5           # rank 1..5 = visible enough, beyond that fix visibility first
 DEBT_STALE_MIN = 30       # open rebuy/resell debt older than this = costing real time
 NO_FILL_MIN = 20          # no trade in this long = market isn't biting at current price
-TIGHT_SPREAD_PCT = 0.12   # below this, squeezing further isn't worth it
+# Both retuned 2026-06-30 around ROUND_TRIP_FEE_PCT - the old 0.12/0.25 pair
+# predates knowing fees exist, and sat entirely inside the loss zone.
+TIGHT_SPREAD_PCT = ROUND_TRIP_FEE_PCT + 0.05   # 0.25% - barely past breakeven, still not worth squeezing for
 STALE_AD_MIN = 20         # ad price unchanged this long while spread is tight = stop waiting
-WIDE_SPREAD_PCT = 0.25    # above this, there's room to wait for a better fill
+WIDE_SPREAD_PCT = ROUND_TRIP_FEE_PCT + 0.20    # 0.40% - genuine post-fee margin worth waiting for
 FRESH_AD_MIN = 10         # ad younger than this hasn't had time to be noticed yet
 
 # ADVISOR_DESIGN.md item 4: a fast-moving market makes a parked ad go stale
@@ -30,6 +44,8 @@ TREND_AGAINST_IDR_PER_MIN = 2.0
 # anywhere downstream (main.py/frontend read `state`/numbers, never grep text).
 STRINGS = {
     "ru": {
+        "advice_floor": "Держи на {price:.0f} (своя себестоимость) — не отдавай ниже",
+        "reason_floor": "Рынок ниже твоей средней цены покупки ({cost:.0f}) — жди отскок, не сливай в убыток",
         "rank_with": "ранг #{rank} из {total}",
         "rank_without": "не найдена в выдаче",
         "price_set": "Выставь {price:.0f}",
@@ -57,6 +73,8 @@ STRINGS = {
         "reason_neutral": "Ни один сигнал явно не доминирует — разница небольшая",
     },
     "en": {
+        "advice_floor": "Hold at {price:.0f} (your own cost) — don't give it away below that",
+        "reason_floor": "Market is below your average buy cost ({cost:.0f}) — wait for a bounce, don't realize a loss",
         "rank_with": "rank #{rank} of {total}",
         "rank_without": "not found in listings",
         "price_set": "Post at {price:.0f}",
@@ -90,7 +108,46 @@ def compute_advice(*, active_side, my_ad, my_ad_age_min, spread_pct,
                     debt_amount, debt_age_min, minutes_since_fill,
                     baseline_price, aggressive_price,
                     market_speed_idr_per_min=None, market_trend_idr_per_min=None,
+                    own_avg_cost_idr=None, own_open_usdt=None,
                     lang="ru"):
+    """Wraps _compute_advice_raw with a fee-aware cost-basis floor on the SELL
+    side: whatever state/price the raw rules land on, never recommend selling
+    below break-even on currently-held inventory - own avg buy cost PLUS
+    ROUND_TRIP_FEE_PCT, since Binance's ~0.1%-per-leg commission (own_avg_cost_idr,
+    own_open_usdt - both from PnLTracker's open FIFO lots) is real money that
+    a raw price comparison misses entirely. Selling at exactly your buy price
+    nets a real loss once both legs' commission is counted - confirmed
+    2026-06-30: a whole session of FIFO-"profitable" trades (Rp 171,278 on
+    paper) was actually a Rp 118,391 net loss after fees. own_open_usdt below
+    ~1 is treated as "nothing real to protect" so a stale historical average
+    can't clamp a position that's effectively empty.
+
+    See _compute_advice_raw for the rest of the parameters and the underlying
+    push/trend/debt/tight/wide/neutral decision tree this wraps."""
+    S = STRINGS.get(lang, STRINGS["ru"])
+    result = _compute_advice_raw(
+        active_side=active_side, my_ad=my_ad, my_ad_age_min=my_ad_age_min, spread_pct=spread_pct,
+        debt_amount=debt_amount, debt_age_min=debt_age_min, minutes_since_fill=minutes_since_fill,
+        baseline_price=baseline_price, aggressive_price=aggressive_price,
+        market_speed_idr_per_min=market_speed_idr_per_min, market_trend_idr_per_min=market_trend_idr_per_min,
+        lang=lang,
+    )
+    has_position = own_open_usdt is not None and own_open_usdt > 1
+    if active_side == "SELL" and has_position and own_avg_cost_idr is not None:
+        breakeven_price = own_avg_cost_idr * (1 + ROUND_TRIP_FEE_PCT / 100)
+        if result["recommended_price"] is not None and result["recommended_price"] < breakeven_price:
+            result["state"] = "floor"
+            result["recommended_price"] = breakeven_price
+            result["advice"] = S["advice_floor"].format(price=breakeven_price)
+            result["reasons"] = [S["reason_floor"].format(cost=own_avg_cost_idr)]
+    return result
+
+
+def _compute_advice_raw(*, active_side, my_ad, my_ad_age_min, spread_pct,
+                         debt_amount, debt_age_min, minutes_since_fill,
+                         baseline_price, aggressive_price,
+                         market_speed_idr_per_min=None, market_trend_idr_per_min=None,
+                         lang="ru"):
     """active_side: "BUY" or "SELL" — which of your two ads matters right now
     (the side carrying open debt, or chosen by raw balance if no debt).
 
