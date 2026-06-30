@@ -7,6 +7,7 @@ open tab on binance.com (logged in to P2P).
 """
 import asyncio
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 from playwright.async_api import async_playwright
@@ -19,6 +20,7 @@ PAY_TYPES = ["BANK"]  # Bank Transfer identifier for IDR
 TICK = 1  # IDR, smallest price increment to undercut/outbid by
 MY_NICKNAME = "bandurkas"
 MY_AD_CHECK_INTERVAL = 10.0  # seconds - deeper, multi-page search, so kept separate from the 4s top-10 poll
+PRICE_HISTORY_MAX_AGE_SEC = 15 * 60  # ADVISOR_DESIGN.md item 4 - market-speed lookback window
 
 
 @dataclass
@@ -29,34 +31,57 @@ class OrderBookSnapshot:
 
     @property
     def best_buy_price(self):
+        """Literal top of book, including any one-off outlier ad - informational only."""
         return self.buy_ads[0]["price"] if self.buy_ads else None
 
     @property
     def best_sell_price(self):
+        """Literal top of book, including any one-off outlier ad - informational only."""
         return self.sell_ads[0]["price"] if self.sell_ads else None
+
+    @staticmethod
+    def _robust_price(ads, n=3):
+        """Median of the top-n prices. A single outlier ad (e.g. someone posting
+        far off the real cluster) can't drag this the way it drags a raw top-1
+        read - that's what fed the advisor a bogus negative spread before."""
+        if not ads:
+            return None
+        prices = sorted(a["price"] for a in ads[:n])
+        mid = len(prices) // 2
+        if len(prices) % 2:
+            return prices[mid]
+        return (prices[mid - 1] + prices[mid]) / 2
+
+    @property
+    def robust_buy_price(self):
+        return self._robust_price(self.buy_ads)
+
+    @property
+    def robust_sell_price(self):
+        return self._robust_price(self.sell_ads)
 
     @property
     def spread_idr(self):
-        if self.best_buy_price is None or self.best_sell_price is None:
+        if self.robust_buy_price is None or self.robust_sell_price is None:
             return None
-        return self.best_buy_price - self.best_sell_price
+        return self.robust_buy_price - self.robust_sell_price
 
     @property
     def spread_pct(self):
-        if not self.spread_idr or not self.best_sell_price:
+        if not self.spread_idr or not self.robust_sell_price:
             return None
-        mid = (self.best_buy_price + self.best_sell_price) / 2
+        mid = (self.robust_buy_price + self.robust_sell_price) / 2
         return (self.spread_idr / mid) * 100
 
     def recommended_prices(self):
-        """Price to post your own ads at, one tick inside the current best."""
+        """Price to post your own ads at, one tick inside the robust (outlier-resistant) best."""
         rec = {}
-        if self.best_buy_price is not None:
+        if self.robust_buy_price is not None:
             # You are SELLING USDT -> want to be the cheapest BUY-side ad (lowest ask)
-            rec["sell_usdt_at"] = self.best_buy_price - TICK
-        if self.best_sell_price is not None:
+            rec["sell_usdt_at"] = self.robust_buy_price - TICK
+        if self.robust_sell_price is not None:
             # You are BUYING USDT -> want to be the highest SELL-side bid
-            rec["buy_usdt_at"] = self.best_sell_price + TICK
+            rec["buy_usdt_at"] = self.robust_sell_price + TICK
         return rec
 
 
@@ -72,22 +97,38 @@ class MarketWatcher:
         self.my_sell_ad = None  # my ad to SELL USDT (shows up when others search to BUY)
         self.my_buy_ad = None   # my ad to BUY USDT (shows up when others search to SELL)
         self.my_ads_updated_at = 0.0
+        # Timestamp of the last observed price change for each ad (0.0 = never seen yet,
+        # which reads as "infinitely stale" until the first successful my-ad poll).
+        self.my_sell_ad_changed_at = 0.0
+        self.my_buy_ad_changed_at = 0.0
+        self._reconnect_lock = asyncio.Lock()
+        self._price_history = deque()  # [(ts, robust_buy_price, robust_sell_price), ...], newest last
 
     async def _connect(self):
-        self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.connect_over_cdp(CDP_URL)
-        for ctx in self._browser.contexts:
-            for pg in ctx.pages:
-                if "binance.com" in pg.url:
-                    self._page = pg
+        async with self._reconnect_lock:
+            # A previous CDP session may still be hanging around (target closed,
+            # browser disconnected) - drop it before opening a new one rather
+            # than leaking playwright/browser handles on every reconnect.
+            if self._playwright is not None:
+                try:
+                    await self._playwright.stop()
+                except Exception:
+                    pass
+            self._page = None
+            self._playwright = await async_playwright().start()
+            self._browser = await self._playwright.chromium.connect_over_cdp(CDP_URL)
+            for ctx in self._browser.contexts:
+                for pg in ctx.pages:
+                    if "binance.com" in pg.url:
+                        self._page = pg
+                        break
+                if self._page:
                     break
-            if self._page:
-                break
-        if self._page is None:
-            raise RuntimeError(
-                "No open binance.com tab found in Opera. Open p2p.binance.com "
-                "in Opera (with VPN on) and log in, then retry."
-            )
+            if self._page is None:
+                raise RuntimeError(
+                    "No open binance.com tab found in Opera. Open p2p.binance.com "
+                    "in Opera (with VPN on) and log in, then retry."
+                )
 
     async def _fetch_side(self, trade_type: str):
         payload = {
@@ -140,7 +181,39 @@ class MarketWatcher:
         buy_side.sort(key=lambda r: r["price"])          # cheapest ask first
         sell_side.sort(key=lambda r: r["price"], reverse=True)  # highest bid first
         self.latest = OrderBookSnapshot(buy_ads=buy_side, sell_ads=sell_side)
+        self._record_price_history(self.latest)
         return self.latest
+
+    def _record_price_history(self, snap):
+        now = snap.timestamp
+        self._price_history.append((now, snap.robust_buy_price, snap.robust_sell_price))
+        while self._price_history and now - self._price_history[0][0] > PRICE_HISTORY_MAX_AGE_SEC:
+            self._price_history.popleft()
+
+    def price_trend_idr_per_min(self, side, lookback_min=10):
+        """Signed price velocity, IDR/min, over the last `lookback_min` minutes
+        (or however much history exists so far). Positive = price rising,
+        negative = price falling. side: "buy" or "sell" - which
+        OrderBookSnapshot price to track. None if not enough history yet."""
+        if len(self._price_history) < 2:
+            return None
+        idx = 1 if side == "buy" else 2
+        now, *_ = self._price_history[-1]
+        current_price = self._price_history[-1][idx]
+        cutoff = now - lookback_min * 60
+        oldest_in_window = next((p for p in self._price_history if p[0] >= cutoff), None)
+        if oldest_in_window is None or current_price is None or oldest_in_window[idx] is None:
+            return None
+        elapsed_min = (now - oldest_in_window[0]) / 60
+        if elapsed_min < 0.5:  # too little history yet to be meaningful
+            return None
+        return (current_price - oldest_in_window[idx]) / elapsed_min
+
+    def price_velocity_idr_per_min(self, side, lookback_min=10):
+        """Unsigned speed - how fast the price has been moving, regardless of
+        direction. See price_trend_idr_per_min for the signed version."""
+        trend = self.price_trend_idr_per_min(side, lookback_min)
+        return abs(trend) if trend is not None else None
 
     async def _search_full(self, trade_type: str, max_pages: int = 6):
         """Multi-page search, no payType filter, used to locate our own ad
@@ -196,6 +269,14 @@ class MarketWatcher:
                 }
         return None
 
+    async def _reconnect_after_error(self, label, error):
+        print(f"[market_watcher] {label} error: {error}")
+        try:
+            await self._connect()
+            print("[market_watcher] reconnected")
+        except Exception as reconnect_error:
+            print(f"[market_watcher] reconnect failed: {reconnect_error}")
+
     async def run_forever(self):
         await self._connect()
         self._running = True
@@ -203,19 +284,33 @@ class MarketWatcher:
             try:
                 await self.poll_once()
             except Exception as e:
-                print(f"[market_watcher] poll error: {e}")
+                await self._reconnect_after_error("poll", e)
             await asyncio.sleep(self.poll_interval)
+
+    @staticmethod
+    def _price_changed(old_ad, new_ad):
+        old_price = old_ad["price"] if old_ad else None
+        new_price = new_ad["price"] if new_ad else None
+        return old_price != new_price
 
     async def run_my_ad_forever(self):
         while self._page is None:
             await asyncio.sleep(0.5)
         while True:
             try:
-                self.my_sell_ad = await self.find_my_ad("BUY")
-                self.my_buy_ad = await self.find_my_ad("SELL")
+                new_sell_ad = await self.find_my_ad("BUY")
+                if self._price_changed(self.my_sell_ad, new_sell_ad):
+                    self.my_sell_ad_changed_at = time.time()
+                self.my_sell_ad = new_sell_ad
+
+                new_buy_ad = await self.find_my_ad("SELL")
+                if self._price_changed(self.my_buy_ad, new_buy_ad):
+                    self.my_buy_ad_changed_at = time.time()
+                self.my_buy_ad = new_buy_ad
+
                 self.my_ads_updated_at = time.time()
             except Exception as e:
-                print(f"[market_watcher] my-ad check error: {e}")
+                await self._reconnect_after_error("my-ad check", e)
             await asyncio.sleep(MY_AD_CHECK_INTERVAL)
 
     def stop(self):

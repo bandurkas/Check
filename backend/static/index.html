@@ -2,209 +2,641 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>P2P USDT/IDR Помощник</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>⌁ TERMINAL — USDT/IDR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  body { background:#0f1115; color:#e6e6e6; font-family:-apple-system,Segoe UI,Roboto,sans-serif; margin:0; padding:16px; }
-  h1 { font-size:18px; margin:0 0 12px; color:#f0b90b; }
-  .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px; }
-  .card { background:#1a1d24; border-radius:10px; padding:14px; }
-  .card h2 { font-size:13px; color:#999; margin:0 0 6px; text-transform:uppercase; letter-spacing:.5px; }
-  .price { font-size:26px; font-weight:700; }
-  .buy { color:#0ecb81; }
-  .sell { color:#f6465d; }
-  .spread { font-size:13px; color:#999; margin-top:4px; }
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th, td { text-align:left; padding:4px 6px; border-bottom:1px solid #262a33; }
-  th { color:#777; font-weight:500; }
-  .stale { color:#f6465d; font-size:12px; margin-top:8px; }
-  .pnl-pos { color:#0ecb81; }
-  .pnl-neg { color:#f6465d; }
-  .updated { font-size:11px; color:#666; text-align:right; }
-  .card.dim { opacity:.35; }
-  .card.active { box-shadow:0 0 0 2px #f0b90b; }
-  .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:6px; background:#f0b90b; color:#000; font-weight:600; margin-left:6px; }
-  .balance-line { font-size:13px; color:#aaa; margin-bottom:10px; }
-  tr.mine { background:#2a2410; outline:1px solid #f0b90b; }
-  .my-rank { font-size:12px; color:#f0b90b; margin-top:6px; }
+:root{
+  --bg-void:#08090b; --bg-panel:#0e1114; --bg-raised:#161b1f;
+  --line:#22282d; --line-bright:#3a444c;
+  --ink:#e9edf0;
+  --ink-dim:#8b949c; --ink-faint:#4a525a;
+  --amber:#ffb300; --amber-soft:#ffd166;
+  --cyan:#2de2c5; --red:#ff3b4e;
+  --pos:#2de2c5; --neg:#ff3b4e; --warn:#ffb300;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+  --sans:'IBM Plex Sans',system-ui,sans-serif;
+  --disp:'Rajdhani',var(--sans);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #131720 0%, var(--bg-void) 55%),
+    var(--bg-void);
+  color:var(--ink);
+  font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;
+  min-height:100vh;
+  padding:0 0 48px;
+}
+.noise{
+  position:fixed; inset:0; pointer-events:none; z-index:1; opacity:.035; mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+.scan{
+  position:fixed; inset:0; pointer-events:none; z-index:2; opacity:.05;
+  background:repeating-linear-gradient(0deg, #000 0px, #000 1px, transparent 1px, transparent 3px);
+}
+.wrap{ max-width:480px; margin:0 auto; padding:14px 14px 0; position:relative; z-index:3; }
+@media(min-width:860px){ .wrap{ max-width:840px; } }
+
+/* ---------- top bar ---------- */
+.topbar{ display:flex; align-items:center; justify-content:space-between; padding:6px 2px 16px; gap:10px; }
+.brand{ font-family:var(--disp); font-weight:700; letter-spacing:.12em; font-size:15px; text-transform:uppercase; color:var(--ink); }
+.brand small{ display:block; font-family:var(--mono); font-weight:400; letter-spacing:.06em; font-size:10px; color:var(--ink-faint); text-transform:none; margin-top:2px; }
+.topbar-right{ display:flex; align-items:center; gap:10px; }
+.live{ display:flex; align-items:center; gap:7px; font-family:var(--mono); font-size:11px; color:var(--ink-dim); white-space:nowrap; }
+.live .dot{ width:7px; height:7px; border-radius:50%; background:var(--cyan); box-shadow:0 0 8px var(--cyan); animation:breathe 2.2s ease-in-out infinite; flex:none; }
+.live.stale .dot{ background:var(--red); box-shadow:0 0 8px var(--red); animation:blink .6s steps(1) infinite; }
+@keyframes breathe{ 0%,100%{opacity:1} 50%{opacity:.35} }
+@keyframes blink{ 0%,49%{opacity:1} 50%,100%{opacity:.2} }
+.lang-toggle{ display:flex; border:1px solid var(--line-bright); border-radius:2px; overflow:hidden; font-family:var(--mono); font-size:10.5px; }
+.lang-toggle button{ background:var(--bg-panel); color:var(--ink-faint); border:none; padding:4px 8px; cursor:pointer; font-family:inherit; font-size:inherit; letter-spacing:.04em; }
+.lang-toggle button.active{ background:var(--amber); color:#1a1305; font-weight:600; }
+
+/* ---------- global klaxon ---------- */
+.klaxon{ display:none; }
+.klaxon.show{
+  display:flex; align-items:center; gap:10px; justify-content:center;
+  margin:0 0 14px; padding:11px 14px; border:1px solid var(--red);
+  background:linear-gradient(180deg, rgba(255,59,78,.16), rgba(255,59,78,.05));
+  color:#ffd9dd; font-family:var(--disp); font-weight:700; letter-spacing:.06em;
+  text-transform:uppercase; font-size:13.5px; border-radius:3px;
+  animation:klaxon-pulse 1.1s ease-in-out infinite;
+}
+@keyframes klaxon-pulse{ 0%,100%{box-shadow:0 0 0px rgba(255,59,78,0)} 50%{box-shadow:0 0 22px rgba(255,59,78,.55)} }
+
+/* ---------- panel shell w/ corner brackets ---------- */
+.panel{ position:relative; background:var(--bg-panel); border:1px solid var(--line); border-radius:2px; padding:16px; }
+.panel::before,.panel::after{ content:''; position:absolute; width:11px; height:11px; opacity:.9; }
+.panel::before{ top:-1px; left:-1px; border-top:2px solid var(--bracket,var(--ink-faint)); border-left:2px solid var(--bracket,var(--ink-faint)); }
+.panel::after{ bottom:-1px; right:-1px; border-bottom:2px solid var(--bracket,var(--ink-faint)); border-right:2px solid var(--bracket,var(--ink-faint)); }
+.eyebrow{ font-family:var(--disp); font-weight:600; letter-spacing:.16em; text-transform:uppercase; font-size:11px; color:var(--ink-faint); }
+
+/* ---------- reveal on load ---------- */
+.reveal{ opacity:0; transform:translateY(10px); animation:rise .5s cubic-bezier(.2,.8,.2,1) forwards; }
+@keyframes rise{ to{opacity:1; transform:none} }
+
+/* ---------- advice panel ---------- */
+.advice{ margin-bottom:12px; --bracket:var(--ink-faint); transition:border-color .3s; }
+.advice.state-wide{ --bracket:var(--cyan); border-color:rgba(45,226,197,.35); }
+.advice.state-push{ --bracket:var(--amber); border-color:rgba(255,179,0,.35); }
+.advice.state-debt,.advice.state-tight,.advice.state-trend{ --bracket:var(--red); border-color:rgba(255,59,78,.4); }
+.advice.state-urgent{ --bracket:var(--red); border-color:var(--red); animation:urgent-glow 1.3s ease-in-out infinite; }
+@keyframes urgent-glow{ 0%,100%{box-shadow:0 0 0 rgba(255,59,78,0)} 50%{box-shadow:0 0 28px rgba(255,59,78,.4) inset, 0 0 18px rgba(255,59,78,.25)} }
+.advice-top{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+.side-badge{ font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.08em; padding:3px 9px; border-radius:2px; border:1px solid var(--line-bright); color:var(--ink-dim); }
+.side-badge.SELL{ color:#ffb8c0; border-color:rgba(255,59,78,.4); background:rgba(255,59,78,.08); }
+.side-badge.BUY{ color:#a9e9dc; border-color:rgba(45,226,197,.4); background:rgba(45,226,197,.08); }
+.advice-text{ font-family:var(--disp); font-weight:700; font-size:25px; line-height:1.15; letter-spacing:.01em; margin:4px 0 10px; }
+.advice-price{ font-family:var(--mono); font-size:34px; font-weight:600; color:var(--ink); letter-spacing:-.01em; }
+.advice-price .cur{ font-size:16px; color:var(--ink-faint); margin-right:4px; }
+.advice-reasons{ list-style:none; margin:12px 0 0; padding:10px 0 0; border-top:1px dashed var(--line); font-family:var(--mono); font-size:12px; color:var(--ink-dim); line-height:1.7; }
+.advice-reasons li{ padding-left:14px; position:relative; }
+.advice-reasons li::before{ content:'›'; position:absolute; left:0; color:var(--ink-faint); }
+.trend-strip{ margin-top:12px; padding:9px 11px; border-radius:2px; font-family:var(--mono); font-size:12.5px; display:flex; align-items:center; gap:8px; border:1px solid var(--line); }
+.trend-strip .arrow{ font-size:15px; }
+.trend-strip.against{ border-color:rgba(255,59,78,.5); background:rgba(255,59,78,.1); color:#ffc2c8; font-weight:600; }
+.trend-strip.with{ border-color:rgba(45,226,197,.35); background:rgba(45,226,197,.06); color:#bdf2e8; }
+.trend-strip.flat{ color:var(--ink-faint); }
+
+/* ---------- gauge row ---------- */
+.gauges{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
+.gauge{ padding:12px 10px; }
+.gauge .val{ font-family:var(--mono); font-size:19px; font-weight:600; margin-top:6px; letter-spacing:-.01em; }
+.gauge .sub{ font-family:var(--mono); font-size:10.5px; color:var(--ink-faint); margin-top:3px; }
+.flash{ animation:flash-bg .7s ease; }
+@keyframes flash-bg{ 0%{ background:rgba(255,179,0,.18); } 100%{ background:transparent; } }
+.pos{ color:var(--pos); } .neg{ color:var(--neg); } .warn-c{ color:var(--warn); }
+
+/* ---------- reference row ---------- */
+.refs{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+.ref h3{ margin:0 0 8px; font-size:11px; }
+.ref .px{ font-family:var(--mono); font-size:22px; font-weight:600; }
+.ref .meta{ font-family:var(--mono); font-size:11px; color:var(--ink-faint); margin-top:5px; }
+.ref.SELL .px{ color:#ffb8c0; } .ref.BUY .px{ color:#a9e9dc; }
+.bank-row{ margin-top:10px; display:flex; gap:6px; }
+.bank-row input{ flex:1; min-width:0; background:var(--bg-void); border:1px solid var(--line-bright); color:var(--ink); border-radius:2px; padding:6px 7px; font-family:var(--mono); font-size:11.5px; }
+.bank-row button{ font-family:var(--disp); font-weight:600; letter-spacing:.04em; text-transform:uppercase; font-size:11px; padding:6px 10px; border-radius:2px; border:1px solid var(--line-bright); background:var(--bg-raised); color:var(--ink); cursor:pointer; }
+.bank-row button:active{ transform:translateY(1px); }
+.bank-check{ margin-top:7px; font-family:var(--mono); font-size:11px; }
+
+/* ---------- balance strip ---------- */
+.balance-strip{ display:flex; justify-content:space-between; align-items:center; font-family:var(--mono); font-size:11.5px; color:var(--ink-dim); padding:9px 12px; margin-bottom:12px; }
+
+/* ---------- work session ---------- */
+.session-strip{ margin-bottom:12px; }
+.session-line{ font-family:var(--mono); font-size:12px; color:var(--ink-dim); line-height:1.7; margin-top:6px; }
+
+/* ---------- orderbook ---------- */
+.books{ display:grid; grid-template-columns:1fr; gap:8px; margin-bottom:12px; }
+@media(min-width:860px){ .books{ grid-template-columns:1fr 1fr; } }
+.book h3{ display:flex; justify-content:space-between; align-items:baseline; }
+.book h3 .n{ font-family:var(--mono); font-size:10px; color:var(--ink-faint); text-transform:none; letter-spacing:0; }
+table{ width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12px; margin-top:8px; }
+th{ text-align:left; font-weight:500; color:var(--ink-faint); font-size:10px; letter-spacing:.06em; text-transform:uppercase; padding:4px 6px; border-bottom:1px solid var(--line); }
+td{ padding:5px 6px; border-bottom:1px solid var(--line); color:var(--ink-dim); }
+tr.mine{ background:rgba(255,179,0,.1); }
+tr.mine td{ color:var(--amber-soft); font-weight:600; }
+.my-status{ margin-top:8px; font-family:var(--mono); font-size:11px; color:var(--ink-faint); padding-top:8px; border-top:1px dashed var(--line); }
+.my-status.found{ color:var(--cyan); }
+
+/* ---------- ledger ---------- */
+.ledger{ margin-bottom:12px; }
+.ledger-summary{ font-family:var(--mono); font-size:12px; color:var(--ink-dim); margin-top:8px; line-height:1.8; }
+.ledger-scroll{ max-height:260px; overflow-y:auto; margin-top:10px; border-top:1px solid var(--line); }
+.ledger-scroll table{ margin-top:0; }
+.ledger-scroll thead th{ position:sticky; top:0; background:var(--bg-panel); }
+
+footer{ text-align:center; font-family:var(--mono); font-size:10.5px; color:var(--ink-faint); padding:18px 0 0; }
 </style>
 </head>
 <body>
-  <h1>P2P USDT/IDR — Bank Transfer</h1>
+<div class="noise"></div>
+<div class="scan"></div>
 
-  <div class="balance-line" id="balance-line">баланс: —</div>
+<div class="wrap">
 
-  <div class="grid">
-    <div class="card" id="card-sell">
-      <h2>Выставить SELL (продать USDT) по <span id="badge-sell"></span></h2>
-      <div class="price sell" id="rec-sell">—</div>
-      <div class="spread" id="best-buy-ref"></div>
-    </div>
-    <div class="card" id="card-buy">
-      <h2>Выставить BUY (купить USDT) по <span id="badge-buy"></span></h2>
-      <div class="price buy" id="rec-buy">—</div>
-      <div class="spread" id="best-sell-ref"></div>
-    </div>
-  </div>
-
-  <div class="card" style="margin-bottom:16px">
-    <h2>Текущий спред рынка</h2>
-    <div id="spread-info">—</div>
-    <div class="stale" id="staleness"></div>
-  </div>
-
-  <div class="grid">
-    <div class="card">
-      <h2>Топ BUY-объявлений (где ты покупаешь)</h2>
-      <table id="buy-table"><thead><tr><th>Цена</th><th>Доступно</th><th>Мерчант</th></tr></thead><tbody></tbody></table>
-      <div class="my-rank" id="my-rank-in-buy-table"></div>
-    </div>
-    <div class="card">
-      <h2>Топ SELL-объявлений (где ты продаёшь)</h2>
-      <table id="sell-table"><thead><tr><th>Цена</th><th>Доступно</th><th>Мерчант</th></tr></thead><tbody></tbody></table>
-      <div class="my-rank" id="my-rank-in-sell-table"></div>
+  <div class="topbar reveal">
+    <div class="brand">⌁ Terminal<small>USDT · IDR · Bank Transfer</small></div>
+    <div class="topbar-right">
+      <div class="live" id="live"><span class="dot"></span><span id="live-text">live</span></div>
+      <div class="lang-toggle">
+        <button id="lang-ru" data-lang="ru">RU</button>
+        <button id="lang-en" data-lang="en">EN</button>
+      </div>
     </div>
   </div>
 
-  <div class="card" style="margin-top:16px">
-    <h2>P&L (по истории сделок Binance, обновляется раз в минуту)</h2>
-    <div id="pnl-summary">—</div>
-    <table id="pnl-table"><thead><tr><th>Время</th><th>Сторона</th><th>Кол-во USDT</th><th>Курс</th><th>Сумма IDR</th></tr></thead><tbody></tbody></table>
+  <div class="klaxon" id="klaxon"></div>
+
+  <section class="panel advice reveal" id="advice-panel" style="animation-delay:.05s">
+    <div class="advice-top">
+      <span class="eyebrow" data-i18n="advice_now">Совет сейчас</span>
+      <span class="side-badge" id="advice-side">—</span>
+    </div>
+    <div class="advice-text" id="advice-text" data-i18n="loading">Загрузка…</div>
+    <div class="advice-price" id="advice-price-wrap" style="display:none"><span class="cur">Rp</span><span id="advice-price">—</span></div>
+    <ul class="advice-reasons" id="advice-reasons"></ul>
+    <div class="trend-strip flat" id="trend-strip"><span class="arrow">→</span><span id="trend-text" data-i18n="trend_loading">копим историю рынка…</span></div>
+  </section>
+
+  <section class="gauges">
+    <div class="panel gauge reveal" style="animation-delay:.1s">
+      <span class="eyebrow" data-i18n="gauge_hourly">$ / час</span>
+      <div class="val" id="g-hourly">—</div>
+      <div class="sub" id="g-hourly-sub"></div>
+    </div>
+    <div class="panel gauge reveal" style="animation-delay:.14s">
+      <span class="eyebrow" data-i18n="gauge_visibility">Видимость</span>
+      <div class="val" id="g-rank">—</div>
+      <div class="sub" id="g-rank-sub"></div>
+    </div>
+    <div class="panel gauge reveal" style="animation-delay:.18s">
+      <span class="eyebrow" data-i18n="gauge_spread">Спред</span>
+      <div class="val" id="g-spread">—</div>
+      <div class="sub" id="g-spread-sub"></div>
+    </div>
+  </section>
+
+  <section class="refs reveal" style="animation-delay:.22s">
+    <div class="panel ref SELL">
+      <h3 class="eyebrow" data-i18n="ref_sell">Sell · продать</h3>
+      <div class="px" id="rec-sell">—</div>
+      <div class="meta" id="best-buy-ref">—</div>
+    </div>
+    <div class="panel ref BUY">
+      <h3 class="eyebrow" data-i18n="ref_buy">Buy · купить</h3>
+      <div class="px" id="rec-buy">—</div>
+      <div class="meta" id="best-sell-ref">—</div>
+      <div class="bank-row">
+        <input type="number" id="bank-balance-input" data-i18n-placeholder="bank_placeholder" placeholder="Банк, IDR">
+        <button id="bank-balance-save" data-i18n="save">Сохр.</button>
+      </div>
+      <div class="bank-check" id="bank-limit-check"></div>
+    </div>
+  </section>
+
+  <div class="panel session-strip reveal" style="animation-delay:.24s">
+    <span class="eyebrow" data-i18n="work_session">Рабочая сессия</span>
+    <div class="session-line" id="session-line">—</div>
   </div>
 
-  <div class="updated" id="last-update"></div>
+  <div class="panel balance-strip reveal" style="animation-delay:.26s">
+    <span data-i18n="balance">Баланс</span>
+    <span id="balance-line">—</span>
+  </div>
+
+  <section class="books reveal" style="animation-delay:.3s">
+    <div class="panel book">
+      <h3 class="eyebrow"><span data-i18n="book_buy_side">Buy-сторона</span> <span class="n" data-i18n="book_buy_side_hint">(где покупаешь ты)</span></h3>
+      <table><thead><tr><th data-i18n="th_price">Цена</th><th>USDT</th><th data-i18n="th_merchant">Мерчант</th></tr></thead><tbody id="buy-table"></tbody></table>
+      <div class="my-status" id="my-rank-in-buy-table"></div>
+    </div>
+    <div class="panel book">
+      <h3 class="eyebrow"><span data-i18n="book_sell_side">Sell-сторона</span> <span class="n" data-i18n="book_sell_side_hint">(где продаёшь ты)</span></h3>
+      <table><thead><tr><th data-i18n="th_price">Цена</th><th>USDT</th><th data-i18n="th_merchant">Мерчант</th></tr></thead><tbody id="sell-table"></tbody></table>
+      <div class="my-status" id="my-rank-in-sell-table"></div>
+    </div>
+  </section>
+
+  <section class="panel ledger reveal" style="animation-delay:.34s">
+    <span class="eyebrow" data-i18n="ledger_title">Журнал сделок</span>
+    <div class="ledger-summary" id="pnl-summary">—</div>
+    <div class="ledger-scroll">
+      <table><thead><tr><th data-i18n="th_time">Время</th><th data-i18n="th_side">Сторона</th><th>USDT</th><th data-i18n="th_rate">Курс</th><th>IDR</th><th data-i18n="th_profit">Прибыль</th></tr></thead><tbody id="pnl-table"></tbody></table>
+    </div>
+  </section>
+
+  <footer id="last-update">—</footer>
+</div>
 
 <script>
-function fmt(n) { return n == null ? "—" : Number(n).toLocaleString("id-ID"); }
-function fmtTime(ms) { return new Date(ms).toLocaleString("ru-RU"); }
+/* ---------- i18n ---------- */
+const I18N = {
+  ru: {
+    advice_now: "Совет сейчас", loading: "Загрузка…", trend_loading: "копим историю рынка…",
+    gauge_hourly: "$ / час", gauge_visibility: "Видимость", gauge_spread: "Спред",
+    ref_sell: "Sell · продать", ref_buy: "Buy · купить",
+    bank_placeholder: "Банк, IDR", save: "Сохр.", balance: "Баланс",
+    book_buy_side: "Buy-сторона", book_buy_side_hint: "(где покупаешь ты)",
+    book_sell_side: "Sell-сторона", book_sell_side_hint: "(где продаёшь ты)",
+    th_price: "Цена", th_merchant: "Мерчант", th_time: "Время", th_side: "Сторона", th_rate: "Курс", th_profit: "Прибыль",
+    ledger_title: "Журнал сделок",
+    live: "live", stale: "устарело {s}с — проверь Opera", backend_down: "backend недоступен",
+    klaxon: "⚠ Рынок {dir} против тебя — действуй сейчас",
+    trend_stable: "рынок стабилен", trend_against: "рынок {dir} (~{speed} IDR/мин) — против тебя",
+    trend_with: "рынок {dir} (~{speed} IDR/мин) — на твоей стороне",
+    dir_up: "растёт", dir_down: "падает", dir_flat: "стабильно",
+    no_ad: "НЕТ", no_ad_sub: "заявка не найдена", of_total: "из {total} · {side}",
+    session_just_started: "сессия только началась",
+    hourly_sub: "~${usd}/час · {h} ч сессия",
+    top_competitor: "топ конкурента: Rp {price}",
+    bank_available: "доступно: Rp {amt}",
+    bank_over: "⚠ лимит (Rp {limit}) больше банка (Rp {bank})",
+    bank_ok: "✓ лимит в пределах банка (Rp {bank})",
+    balance_unavailable: "недоступен{err}", balance_error: "ошибка {e}",
+    ad_status_found: "ранг #{rank} из {total} · цена {price} · доступно {avail} USDT",
+    ad_status_missing: "заявки сейчас не видно в этой стороне рынка",
+    pnl_summary: "Реализовано всего: {pnl} · {cycles} циклов · {trades} сделок",
+    pnl_open: "В работе: {usdt} USDT по {price}",
+    pnl_debt: "Долг на докупку: {usdt} USDT",
+    pnl_surplus: "Излишек на продажу: {usdt} USDT",
+    pnl_error: "Ошибка: {e}",
+    updated: "обновлено {t}",
+    work_session: "Рабочая сессия",
+    session_started: "Начата {time} · открыто Rp {opening}",
+    session_earned: "Заработано: {pnl} ({cycles} циклов)",
+    session_open: "В работе: {usdt} USDT по {price}",
+  },
+  en: {
+    advice_now: "Advice now", loading: "Loading…", trend_loading: "gathering market history…",
+    gauge_hourly: "$ / hour", gauge_visibility: "Visibility", gauge_spread: "Spread",
+    ref_sell: "Sell · post ask", ref_buy: "Buy · post bid",
+    bank_placeholder: "Bank, IDR", save: "Save", balance: "Balance",
+    book_buy_side: "Buy side", book_buy_side_hint: "(where you buy)",
+    book_sell_side: "Sell side", book_sell_side_hint: "(where you sell)",
+    th_price: "Price", th_merchant: "Merchant", th_time: "Time", th_side: "Side", th_rate: "Rate", th_profit: "Profit",
+    ledger_title: "Trade ledger",
+    live: "live", stale: "stale {s}s — check Opera", backend_down: "backend unreachable",
+    klaxon: "⚠ Market {dir} against you — act now",
+    trend_stable: "market is flat", trend_against: "market {dir} (~{speed} IDR/min) — against you",
+    trend_with: "market {dir} (~{speed} IDR/min) — in your favor",
+    dir_up: "rising", dir_down: "falling", dir_flat: "flat",
+    no_ad: "NONE", no_ad_sub: "ad not found", of_total: "of {total} · {side}",
+    session_just_started: "session just started",
+    hourly_sub: "~${usd}/hr · {h}h session",
+    top_competitor: "top competitor: Rp {price}",
+    bank_available: "available: Rp {amt}",
+    bank_over: "⚠ limit (Rp {limit}) exceeds bank (Rp {bank})",
+    bank_ok: "✓ limit within bank (Rp {bank})",
+    balance_unavailable: "unavailable{err}", balance_error: "error {e}",
+    ad_status_found: "rank #{rank} of {total} · price {price} · available {avail} USDT",
+    ad_status_missing: "your ad isn't currently visible on this side of the market",
+    pnl_summary: "Total realized: {pnl} · {cycles} cycles · {trades} trades",
+    pnl_open: "In flight: {usdt} USDT at {price}",
+    pnl_debt: "Owed rebuy: {usdt} USDT",
+    pnl_surplus: "Surplus to sell: {usdt} USDT",
+    pnl_error: "Error: {e}",
+    updated: "updated {t}",
+    work_session: "Working session",
+    session_started: "Started {time} · opened with Rp {opening}",
+    session_earned: "Earned: {pnl} ({cycles} cycles)",
+    session_open: "In flight: {usdt} USDT at {price}",
+  },
+};
+let lang = localStorage.getItem("lang") || "ru";
 
-async function refreshOrderbook() {
-  try {
+function t(key, vars){
+  let s = (I18N[lang] && I18N[lang][key]) || key;
+  if(vars) for(const k in vars) s = s.split("{"+k+"}").join(vars[k]);
+  return s;
+}
+function dirWord(code){ return code === "up" ? t("dir_up") : code === "down" ? t("dir_down") : t("dir_flat"); }
+
+function applyStaticI18n(){
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.getAttribute("data-i18n")); });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach(el => { el.placeholder = t(el.getAttribute("data-i18n-placeholder")); });
+  document.getElementById("lang-ru").classList.toggle("active", lang === "ru");
+  document.getElementById("lang-en").classList.toggle("active", lang === "en");
+}
+function setLang(l){
+  lang = l;
+  localStorage.setItem("lang", l);
+  applyStaticI18n();
+  // Re-fetch everything now rather than waiting for each panel's own poll
+  // interval (up to 90s) - a language switch should repaint immediately.
+  refreshOrderbook(); refreshAdvice(); refreshEarnings(); refreshPnl(); refreshBalance(); refreshWorkSession();
+}
+document.getElementById("lang-ru").addEventListener("click", () => setLang("ru"));
+document.getElementById("lang-en").addEventListener("click", () => setLang("en"));
+applyStaticI18n();
+
+/* ---------- helpers ---------- */
+function fmt(n){ return n==null ? "—" : Number(n).toLocaleString("id-ID"); }
+function fmtTime(ms){ return new Date(ms).toLocaleString(lang === "ru" ? "ru-RU" : "en-GB"); }
+function flash(el){ el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
+
+const MY_NICKNAME = "bandurkas";
+let bankBalanceIdr = null;
+let lastBuyAdMaxLimit = null;
+let lastAdvicePrice = null;
+let lastHourly = null;
+
+/* ---------- orderbook ---------- */
+async function refreshOrderbook(){
+  try{
     const r = await fetch("/api/orderbook");
     const d = await r.json();
-    document.getElementById("rec-sell").textContent = d.recommended.sell_usdt_at ? "Rp " + fmt(d.recommended.sell_usdt_at) : "—";
-    document.getElementById("rec-buy").textContent = d.recommended.buy_usdt_at ? "Rp " + fmt(d.recommended.buy_usdt_at) : "—";
-    document.getElementById("best-buy-ref").textContent = "топ конкурента: Rp " + fmt(d.best_buy_price);
-    document.getElementById("best-sell-ref").textContent = "топ конкурента: Rp " + fmt(d.best_sell_price);
-    document.getElementById("spread-info").textContent =
-      d.spread_idr != null ? `Rp ${fmt(d.spread_idr)} (${d.spread_pct.toFixed(3)}%)` : "нет данных";
+
+    document.getElementById("rec-sell").textContent = d.recommended.sell_usdt_at ? fmt(d.recommended.sell_usdt_at) : "—";
+    document.getElementById("rec-buy").textContent = d.recommended.buy_usdt_at ? fmt(d.recommended.buy_usdt_at) : "—";
+    document.getElementById("best-buy-ref").textContent = t("top_competitor", {price: fmt(d.best_buy_price)});
+    document.getElementById("best-sell-ref").textContent = t("top_competitor", {price: fmt(d.best_sell_price)});
+
+    document.getElementById("g-spread").textContent = d.spread_idr != null ? "Rp " + fmt(d.spread_idr) : "—";
+    document.getElementById("g-spread-sub").textContent = d.spread_pct != null ? d.spread_pct.toFixed(3) + "%" : "—";
 
     const ageSec = (Date.now()/1000 - d.timestamp);
-    const staleEl = document.getElementById("staleness");
-    if (ageSec > 20) {
-      staleEl.textContent = `⚠ данные устарели (${ageSec.toFixed(0)}с) — проверь, что Opera с открытой вкладкой Binance запущена`;
+    const liveEl = document.getElementById("live");
+    const liveText = document.getElementById("live-text");
+    if(ageSec > 20){
+      liveEl.classList.add("stale");
+      liveText.textContent = t("stale", {s: ageSec.toFixed(0)});
     } else {
-      staleEl.textContent = "";
+      liveEl.classList.remove("stale");
+      liveText.textContent = t("live");
     }
 
-    const MY_NICKNAME = "bandurkas";
     const rowHtml = a => {
       const mine = (a.merchant || "").toLowerCase() === MY_NICKNAME;
-      return `<tr class="${mine ? 'mine' : ''}"><td>${fmt(a.price)}</td><td>${a.available.toFixed(0)}</td><td>${a.merchant}${mine ? ' ⭐' : ''}</td></tr>`;
+      return `<tr class="${mine?'mine':''}"><td>${fmt(a.price)}</td><td>${a.available.toFixed(0)}</td><td>${a.merchant}${mine?' ★':''}</td></tr>`;
     };
-    const buyBody = document.querySelector("#buy-table tbody");
-    buyBody.innerHTML = d.buy_ads.map(rowHtml).join("");
-    const sellBody = document.querySelector("#sell-table tbody");
-    sellBody.innerHTML = d.sell_ads.map(rowHtml).join("");
+    document.querySelector("#buy-table").innerHTML = d.buy_ads.map(rowHtml).join("");
+    document.querySelector("#sell-table").innerHTML = d.sell_ads.map(rowHtml).join("");
 
-    // "buy-table" lists sell-side ads -> that's where MY SELL ad would appear.
-    // "sell-table" lists buy-side ads -> that's where MY BUY ad would appear.
-    const myRankText = (ad) => ad ? `Твоя заявка: ранг #${ad.rank} из ${ad.total}, цена ${fmt(ad.price)}, доступно ${ad.available.toFixed(0)} USDT` : "Твоей заявки сейчас не видно в этой стороне рынка";
-    document.getElementById("my-rank-in-buy-table").textContent = myRankText(d.my_sell_ad);
-    document.getElementById("my-rank-in-sell-table").textContent = myRankText(d.my_buy_ad);
+    const myRankText = (ad) => {
+      if(!ad) return {text: t("ad_status_missing"), found:false};
+      return {text: t("ad_status_found", {rank:ad.rank, total:ad.total, price:fmt(ad.price), avail:ad.available.toFixed(0)}), found:true};
+    };
+    const sellInfo = myRankText(d.my_sell_ad);
+    const buyInfo = myRankText(d.my_buy_ad);
+    const buyTableStatus = document.getElementById("my-rank-in-buy-table");
+    buyTableStatus.textContent = sellInfo.text; buyTableStatus.classList.toggle("found", sellInfo.found);
+    const sellTableStatus = document.getElementById("my-rank-in-sell-table");
+    sellTableStatus.textContent = buyInfo.text; sellTableStatus.classList.toggle("found", buyInfo.found);
 
-    document.getElementById("last-update").textContent = "обновлено: " + new Date().toLocaleTimeString("ru-RU");
-  } catch (e) {
-    document.getElementById("staleness").textContent = "⚠ backend недоступен: " + e;
+    lastBuyAdMaxLimit = d.my_buy_ad ? d.my_buy_ad.max_limit : null;
+    renderBankLimitCheck();
+
+    renderVisibilityGauge(d.my_sell_ad, d.my_buy_ad);
+
+    document.getElementById("last-update").textContent = t("updated", {t: new Date().toLocaleTimeString(lang === "ru" ? "ru-RU" : "en-GB")});
+  } catch(e){
+    document.getElementById("live-text").textContent = t("backend_down");
+    document.getElementById("live").classList.add("stale");
   }
 }
 
-async function refreshPnl() {
-  try {
+let lastOwnAds = {sell:null, buy:null};
+function renderVisibilityGauge(mySellAd, myBuyAd){
+  lastOwnAds = {sell:mySellAd, buy:myBuyAd};
+  const side = window.activeSide || "SELL";
+  const ad = side === "SELL" ? mySellAd : myBuyAd;
+  const el = document.getElementById("g-rank");
+  const sub = document.getElementById("g-rank-sub");
+  if(!ad){
+    el.textContent = t("no_ad"); el.className = "val neg";
+    sub.textContent = t("no_ad_sub");
+    return;
+  }
+  el.textContent = "#" + ad.rank;
+  el.className = "val " + (ad.rank <= 5 ? "pos" : "warn-c");
+  sub.textContent = t("of_total", {total: ad.total, side: side});
+}
+
+/* ---------- advice ---------- */
+async function refreshAdvice(){
+  try{
+    const r = await fetch("/api/advice?lang=" + lang);
+    const d = await r.json();
+    window.activeSide = d.side;
+
+    const panel = document.getElementById("advice-panel");
+    panel.classList.remove("state-push","state-trend","state-debt","state-tight","state-wide","state-urgent");
+    panel.classList.add("state-" + d.state);
+    if(d.market_against) panel.classList.add("state-urgent");
+
+    const badge = document.getElementById("advice-side");
+    badge.textContent = d.side || "—";
+    badge.className = "side-badge " + (d.side || "");
+
+    document.getElementById("advice-text").removeAttribute("data-i18n");
+    document.getElementById("advice-text").textContent = d.advice;
+
+    const priceWrap = document.getElementById("advice-price-wrap");
+    const priceEl = document.getElementById("advice-price");
+    if(d.recommended_price != null){
+      priceWrap.style.display = "block";
+      priceEl.textContent = fmt(Math.round(d.recommended_price));
+      if(lastAdvicePrice !== null && lastAdvicePrice !== d.recommended_price) flash(priceWrap);
+      lastAdvicePrice = d.recommended_price;
+    } else {
+      priceWrap.style.display = "none";
+    }
+
+    document.getElementById("advice-reasons").innerHTML = (d.reasons||[]).map(x=>`<li>${x}</li>`).join("");
+
+    const klaxon = document.getElementById("klaxon");
+    klaxon.classList.toggle("show", !!d.market_against);
+    if(d.market_against) klaxon.textContent = t("klaxon", {dir: dirWord(d.market_direction)});
+
+    const strip = document.getElementById("trend-strip");
+    const text = document.getElementById("trend-text");
+    text.removeAttribute("data-i18n");
+    strip.classList.remove("against","with","flat");
+    if(d.market_trend_idr_per_min == null){
+      strip.classList.add("flat");
+      strip.querySelector(".arrow").textContent = "→";
+      text.textContent = t("trend_loading");
+    } else {
+      const speed = Math.abs(d.market_trend_idr_per_min).toFixed(1);
+      const arrow = d.market_direction === "up" ? "↑" : d.market_direction === "down" ? "↓" : "→";
+      strip.querySelector(".arrow").textContent = arrow;
+      const dir = dirWord(d.market_direction);
+      if(d.market_against){ strip.classList.add("against"); text.textContent = t("trend_against", {dir, speed}); }
+      else if(d.market_direction === "flat"){ strip.classList.add("flat"); text.textContent = t("trend_stable"); }
+      else { strip.classList.add("with"); text.textContent = t("trend_with", {dir, speed}); }
+    }
+
+    renderVisibilityGauge(lastOwnAds.sell, lastOwnAds.buy);
+  } catch(e){
+    document.getElementById("advice-text").textContent = "⚠ " + e;
+  }
+}
+
+/* ---------- earnings ---------- */
+async function refreshEarnings(){
+  try{
+    const r = await fetch("/api/earnings");
+    const d = await r.json();
+    const elH = document.getElementById("g-hourly");
+    const elSub = document.getElementById("g-hourly-sub");
+    if(d.error || d.idr_per_hour == null){
+      elH.textContent = "—"; elH.className = "val";
+      elSub.textContent = d.error ? d.error : t("session_just_started");
+      return;
+    }
+    elH.textContent = (d.idr_per_hour >= 0 ? "+" : "") + fmt(Math.round(d.idr_per_hour));
+    elH.className = "val " + (d.idr_per_hour >= 0 ? "pos" : "neg");
+    if(lastHourly !== null && lastHourly !== d.idr_per_hour) flash(elH);
+    lastHourly = d.idr_per_hour;
+    elSub.textContent = t("hourly_sub", {usd: d.usd_per_hour.toFixed(3), h: d.session_hours_elapsed.toFixed(1)});
+  } catch(e){
+    document.getElementById("g-hourly").textContent = "⚠";
+  }
+}
+
+/* ---------- pnl ledger ---------- */
+async function refreshPnl(){
+  try{
     const r = await fetch("/api/pnl");
     const d = await r.json();
-    if (d.error) {
-      document.getElementById("pnl-summary").textContent = "Ошибка получения P&L: " + d.error;
-      return;
-    }
-    if (!d.summary) { return; }
+    if(d.error){ document.getElementById("pnl-summary").textContent = t("pnl_error", {e: d.error}); return; }
+    if(!d.summary) return;
     const s = d.summary;
-    lastPnlSummary = s;
-    const cls = s.realized_pnl_idr >= 0 ? "pnl-pos" : "pnl-neg";
-    document.getElementById("pnl-summary").innerHTML =
-      `Сделок: ${s.total_trades} (buy ${s.buy_trades} / sell ${s.sell_trades}) · завершённых циклов: ${s.matched_cycles} · ` +
-      `Реализованный P&L: <span class="${cls}">Rp ${fmt(s.realized_pnl_idr)}</span>`;
-    const body = document.querySelector("#pnl-table tbody");
-    body.innerHTML = d.cycles.slice().reverse().map(c =>
-      `<tr><td>${fmtTime(c.time)}</td><td>${c.side}</td><td>${c.amount}</td><td>${fmt(c.unit_price)}</td><td>${fmt(c.total)}</td></tr>`
-    ).join("");
-  } catch (e) {
-    document.getElementById("pnl-summary").textContent = "⚠ ошибка: " + e;
+    const cls = s.realized_pnl_idr >= 0 ? "pos" : "neg";
+    const pnlSpan = `<span class="${cls}">Rp ${fmt(Math.round(s.realized_pnl_idr))}</span>`;
+    let html = t("pnl_summary", {pnl: pnlSpan, cycles: s.matched_cycles, trades: s.total_trades});
+    if(s.open_tracked_usdt > 0){
+      html += "<br>" + t("pnl_open", {usdt: s.open_tracked_usdt.toFixed(0), price: fmt(s.open_tracked_avg_cost_idr)});
+    }
+    if(s.open_sell_remainder_usdt > 0){
+      html += "<br>" + t("pnl_debt", {usdt: s.open_sell_remainder_usdt.toFixed(0)});
+    } else if(s.open_buy_surplus_usdt > 0){
+      html += "<br>" + t("pnl_surplus", {usdt: s.open_buy_surplus_usdt.toFixed(0)});
+    }
+    document.getElementById("pnl-summary").innerHTML = html;
+    document.querySelector("#pnl-table").innerHTML = d.cycles.slice().reverse().map(c => {
+      let profitCell = "—";
+      if(c.side === "SELL" && c.profit_idr != null){
+        const pcls = c.profit_idr >= 0 ? "pos" : "neg";
+        profitCell = `<span class="${pcls}">Rp ${fmt(Math.round(c.profit_idr))}</span>`;
+        if(c.unmatched_usdt > 0) profitCell += " ⚠";
+      } else if(c.side === "BUY" && c.unrealized_profit_idr != null){
+        const pcls = c.unrealized_profit_idr >= 0 ? "pos" : "neg";
+        profitCell = `<span class="${pcls}">~Rp ${fmt(Math.round(c.unrealized_profit_idr))}</span>`;
+      }
+      return `<tr><td>${fmtTime(c.time)}</td><td class="${c.side==='SELL'?'neg':'pos'}">${c.side}</td><td>${c.amount}</td><td>${fmt(c.unit_price)}</td><td>${fmt(c.total)}</td><td>${profitCell}</td></tr>`;
+    }).join("");
+  } catch(e){
+    document.getElementById("pnl-summary").textContent = "⚠ " + e;
   }
 }
 
-const BALANCE_THRESHOLD_USDT = 1; // ниже этого считаем, что USDT распродан
-
-let lastPnlSummary = null;
-
-async function refreshBalance() {
-  try {
+/* ---------- balance (display only — advisor decides the active side now) ---------- */
+async function refreshBalance(){
+  try{
     const r = await fetch("/api/balance");
     const d = await r.json();
-    const cardSell = document.getElementById("card-sell");
-    const cardBuy = document.getElementById("card-buy");
-    const badgeSell = document.getElementById("badge-sell");
-    const badgeBuy = document.getElementById("badge-buy");
-    const balanceLine = document.getElementById("balance-line");
-
-    if (d.error || d.total_usdt == null) {
-      balanceLine.textContent = "баланс: недоступен" + (d.error ? " (" + d.error.slice(0,80) + ")" : "");
-      cardSell.classList.remove("dim","active");
-      cardBuy.classList.remove("dim","active");
-      badgeSell.textContent = ""; badgeBuy.textContent = "";
+    if(d.error || d.total_usdt == null){
+      document.getElementById("balance-line").textContent = t("balance_unavailable", {err: d.error ? " ("+d.error.slice(0,60)+")" : ""});
       return;
     }
-
-    let balanceText = `баланс: ${Math.round(d.total_usdt)} USDT (spot ${Math.round(d.spot_usdt)} + funding ${Math.round(d.funding_usdt)})`;
-
-    const openGap = lastPnlSummary ? lastPnlSummary.open_sell_remainder_usdt : 0;
-    const openSurplus = lastPnlSummary ? lastPnlSummary.open_buy_surplus_usdt : 0;
-
-    let highlightSell;
-    if (openGap > 1) {
-      // есть незакрытый долг по докупке с прошлой продажи - приоритет BUY, даже если на балансе что-то есть
-      highlightSell = false;
-      balanceText += ` · не докуплено с прошлой продажи: ${Math.round(openGap)} USDT`;
-    } else if (openSurplus > 1) {
-      // куплено больше, чем продано - есть что продавать
-      highlightSell = true;
-    } else {
-      // нет открытого долга по истории - решаем по сырому балансу
-      highlightSell = d.total_usdt >= BALANCE_THRESHOLD_USDT;
-    }
-
-    balanceLine.textContent = balanceText;
-
-    if (highlightSell) {
-      cardSell.classList.add("active"); cardSell.classList.remove("dim");
-      cardBuy.classList.add("dim"); cardBuy.classList.remove("active");
-      badgeSell.innerHTML = '<span class="badge">сейчас это</span>';
-      badgeBuy.innerHTML = "";
-    } else {
-      cardBuy.classList.add("active"); cardBuy.classList.remove("dim");
-      cardSell.classList.add("dim"); cardSell.classList.remove("active");
-      badgeBuy.innerHTML = '<span class="badge">сейчас это</span>';
-      badgeSell.innerHTML = "";
-    }
-  } catch (e) {
-    document.getElementById("balance-line").textContent = "баланс: ошибка " + e;
+    document.getElementById("balance-line").textContent =
+      `${Math.round(d.total_usdt)} USDT (spot ${Math.round(d.spot_usdt)} + funding ${Math.round(d.funding_usdt)})`;
+  } catch(e){
+    document.getElementById("balance-line").textContent = t("balance_error", {e});
   }
 }
 
-refreshOrderbook(); refreshPnl(); refreshBalance();
+/* ---------- bank balance manual input ---------- */
+function renderBankLimitCheck(){
+  const el = document.getElementById("bank-limit-check");
+  if(bankBalanceIdr == null){ el.textContent = ""; return; }
+  if(lastBuyAdMaxLimit == null){
+    el.innerHTML = t("bank_available", {amt: fmt(bankBalanceIdr)});
+    return;
+  }
+  if(lastBuyAdMaxLimit > bankBalanceIdr){
+    el.innerHTML = `<span class="neg">${t("bank_over", {limit: fmt(lastBuyAdMaxLimit), bank: fmt(bankBalanceIdr)})}</span>`;
+  } else {
+    el.innerHTML = `<span class="pos">${t("bank_ok", {bank: fmt(bankBalanceIdr)})}</span>`;
+  }
+}
+async function refreshBankBalance(){
+  try{
+    const r = await fetch("/api/bank-balance");
+    const d = await r.json();
+    bankBalanceIdr = d.available_idr;
+    document.getElementById("bank-balance-input").value = Math.round(bankBalanceIdr);
+    renderBankLimitCheck();
+  } catch(e){}
+}
+document.getElementById("bank-balance-save").addEventListener("click", async () => {
+  const val = parseFloat(document.getElementById("bank-balance-input").value);
+  if(!val || val <= 0) return;
+  await fetch("/api/bank-balance", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({available_idr: val}),
+  });
+  bankBalanceIdr = val;
+  renderBankLimitCheck();
+  refreshWorkSession();
+});
+
+/* ---------- working session — marked every time the bank balance changes ---------- */
+async function refreshWorkSession(){
+  try{
+    const r = await fetch("/api/work-sessions");
+    const d = await r.json();
+    const s = d.current;
+    const startedTime = new Date(s.started_at * 1000).toLocaleString(lang === "ru" ? "ru-RU" : "en-GB");
+    const cls = s.realized_pnl_idr >= 0 ? "pos" : "neg";
+    const pnlSpan = `<span class="${cls}">Rp ${fmt(Math.round(s.realized_pnl_idr))}</span>`;
+    let html = t("session_started", {time: startedTime, opening: fmt(Math.round(s.opening_balance_idr))});
+    html += "<br>" + t("session_earned", {pnl: pnlSpan, cycles: s.matched_cycles});
+    if(s.open_usdt > 0){
+      html += "<br>" + t("session_open", {usdt: s.open_usdt.toFixed(0), price: fmt(s.open_avg_cost_idr)});
+    }
+    document.getElementById("session-line").innerHTML = html;
+  } catch(e){
+    document.getElementById("session-line").textContent = "⚠ " + e;
+  }
+}
+
+/* ---------- boot ---------- */
+refreshOrderbook(); refreshAdvice(); refreshEarnings(); refreshPnl(); refreshBalance(); refreshBankBalance(); refreshWorkSession();
 setInterval(refreshOrderbook, 4000);
-setInterval(refreshPnl, 90000);
+setInterval(refreshAdvice, 10000);
 setInterval(refreshBalance, 60000);
+setInterval(refreshPnl, 90000);
+setInterval(refreshEarnings, 90000);
+setInterval(refreshWorkSession, 90000);
 </script>
 </body>
 </html>

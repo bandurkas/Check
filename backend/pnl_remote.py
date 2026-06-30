@@ -13,4 +13,4 @@ from pnl_tracker import PnLTracker
 load_dotenv()
 tracker = PnLTracker(os.environ["BINANCE_API_KEY"], os.environ["BINANCE_API_SECRET"])
 tracker.poll()
-print(json.dumps({"summary": tracker.summary(), "cycles": tracker.cycles}))
+print(json.dumps({"summary": tracker.summary(), "cycles": tracker.annotated_cycles()}))

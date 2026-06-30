@@ -16,6 +16,9 @@ import httpx
 BASE_URL = "https://api.binance.com"
 
 
+SESSION_GAP_HOURS = 3  # a quiet gap this long marks the start of a new trading session
+
+
 class PnLTracker:
     def __init__(self, api_key: str, api_secret: str):
         self.api_key = api_key
@@ -62,38 +65,131 @@ class PnLTracker:
         self.cycles.sort(key=lambda t: t["time"])
         return new_trades
 
-    def summary(self):
-        """FIFO-match BUY lots against SELL lots to estimate realized P&L in fiat."""
-        buys = [c for c in self.cycles if c["side"] == "BUY"]
-        sells = [c for c in self.cycles if c["side"] == "SELL"]
-        buy_queue = [dict(c) for c in sorted(buys, key=lambda c: c["time"])]
+    @staticmethod
+    def _fifo_match(events):
+        """events: trades sorted by time. True time-respecting FIFO - a SELL can
+        only consume BUY lots that happened at or before it, never a later one
+        (you can't fund a sale with USDT you haven't bought yet). Any sell amount
+        left over once the queue runs dry was funded by untracked/pre-existing
+        balance - no known cost basis, excluded from realized P&L rather than
+        wrongly matched against a future buy's price."""
+        buy_queue = []
         realized_pnl = 0.0
         matched_cycles = 0
-        for sell in sorted(sells, key=lambda c: c["time"]):
-            remaining = sell["amount"]
-            sell_unit = sell["unit_price"]
-            while remaining > 1e-9 and buy_queue:
-                lot = buy_queue[0]
-                take = min(remaining, lot["amount"])
-                realized_pnl += take * (sell_unit - lot["unit_price"])
-                lot["amount"] -= take
-                remaining -= take
-                if lot["amount"] <= 1e-9:
-                    buy_queue.pop(0)
-                    matched_cycles += 1
+        unmatched_sell_usdt = 0.0
+        for c in events:
+            if c["side"] == "BUY":
+                buy_queue.append({"amount": c["amount"], "unit_price": c["unit_price"]})
+            else:
+                remaining = c["amount"]
+                sell_unit = c["unit_price"]
+                while remaining > 1e-9 and buy_queue:
+                    lot = buy_queue[0]
+                    take = min(remaining, lot["amount"])
+                    realized_pnl += take * (sell_unit - lot["unit_price"])
+                    lot["amount"] -= take
+                    remaining -= take
+                    if lot["amount"] <= 1e-9:
+                        buy_queue.pop(0)
+                        matched_cycles += 1
+                if remaining > 1e-9:
+                    unmatched_sell_usdt += remaining
+        return realized_pnl, matched_cycles, unmatched_sell_usdt, buy_queue
+
+    @staticmethod
+    def _fifo_annotate(events):
+        """Same time-respecting FIFO as _fifo_match, but tags each trade with
+        the profit_idr it actually realized instead of only a running total -
+        lets the ledger table show real per-row profit. BUY rows get
+        profit_idr=None (nothing realized until a later sell closes them) and
+        open_usdt = however much of that lot is still unsold once every event
+        has been processed (0 once it's fully matched away). open_usdt carries
+        no price - the caller knows the live market price, this module doesn't.
+        A SELL that outruns the buy queue gets unmatched_usdt>0 on top of the
+        profit from whatever portion did match."""
+        buy_queue = []  # [{"row": dict, "amount": float, "unit_price": float}, ...]
+        annotated = []
+        for c in events:
+            row = dict(c)
+            if c["side"] == "BUY":
+                buy_queue.append({"row": row, "amount": c["amount"], "unit_price": c["unit_price"]})
+                row["profit_idr"] = None
+                row["unmatched_usdt"] = 0.0
+                row["open_usdt"] = 0.0
+            else:
+                remaining = c["amount"]
+                sell_unit = c["unit_price"]
+                profit = 0.0
+                while remaining > 1e-9 and buy_queue:
+                    lot = buy_queue[0]
+                    take = min(remaining, lot["amount"])
+                    profit += take * (sell_unit - lot["unit_price"])
+                    lot["amount"] -= take
+                    remaining -= take
+                    if lot["amount"] <= 1e-9:
+                        buy_queue.pop(0)
+                row["profit_idr"] = round(profit, 2)
+                row["unmatched_usdt"] = round(remaining, 4) if remaining > 1e-9 else 0.0
+            annotated.append(row)
+        for lot in buy_queue:
+            lot["row"]["open_usdt"] = round(lot["amount"], 4)
+        return annotated
+
+    def annotated_cycles(self):
+        """self.cycles (raw trades) with per-row profit_idr filled in - what
+        the dashboard ledger table renders instead of bare totals."""
+        events = sorted(self.cycles, key=lambda c: c["time"])
+        return self._fifo_annotate(events)
+
+    @staticmethod
+    def _open_position(lots):
+        usdt = sum(l["amount"] for l in lots)
+        cost_idr = sum(l["amount"] * l["unit_price"] for l in lots)
+        avg_cost = round(cost_idr / usdt, 2) if usdt > 1e-9 else None
+        return round(usdt, 4), avg_cost
+
+    def summary(self):
+        events = sorted(self.cycles, key=lambda c: c["time"])
+        realized_pnl, matched_cycles, unmatched_sell_usdt, open_lots = self._fifo_match(events)
+        open_tracked_usdt, open_tracked_avg_cost = self._open_position(open_lots)
+
+        buys = [c for c in self.cycles if c["side"] == "BUY"]
+        sells = [c for c in self.cycles if c["side"] == "SELL"]
         total_buy_amount = sum(c["amount"] for c in buys)
         total_sell_amount = sum(c["amount"] for c in sells)
+        # Simple net flow (not FIFO-causal) - the right number for "current state"
+        # questions like "do I owe a rebuy right now", since it's just conservation
+        # of USDT and doesn't care which specific lot funded which sale.
         # Positive => sold more than bought back yet (open "need to rebuy" gap).
         # Negative => bought more than sold (holding spare USDT, free to sell).
-        open_sell_remainder = round(total_sell_amount - total_buy_amount, 4)
+        net = round(total_sell_amount - total_buy_amount, 4)
+
+        # Current trading session = trades after the most recent gap > SESSION_GAP_HOURS.
+        session_events = events
+        for i in range(len(events) - 1, 0, -1):
+            gap_h = (events[i]["time"] - events[i - 1]["time"]) / 3_600_000
+            if gap_h > SESSION_GAP_HOURS:
+                session_events = events[i:]
+                break
+        session_pnl, session_matched, _, session_open_lots = self._fifo_match(session_events)
+        session_open_usdt, session_open_avg_cost = self._open_position(session_open_lots)
+
         return {
             "total_trades": len(self.cycles),
             "buy_trades": len(buys),
             "sell_trades": len(sells),
             "matched_cycles": matched_cycles,
             "realized_pnl_idr": round(realized_pnl, 2),
-            "open_sell_remainder_usdt": max(0.0, open_sell_remainder),
-            "open_buy_surplus_usdt": max(0.0, -open_sell_remainder),
+            "unmatched_sell_usdt": round(unmatched_sell_usdt, 4),
+            "open_tracked_usdt": open_tracked_usdt,
+            "open_tracked_avg_cost_idr": open_tracked_avg_cost,
+            "open_sell_remainder_usdt": max(0.0, net),
+            "open_buy_surplus_usdt": max(0.0, -net),
+            "session_start_ms": session_events[0]["time"] if session_events else None,
+            "session_matched_cycles": session_matched,
+            "session_realized_pnl_idr": round(session_pnl, 2),
+            "session_open_usdt": session_open_usdt,
+            "session_open_avg_cost_idr": session_open_avg_cost,
         }
 
 
