@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
+from ad_repricer import AdRepricer
 from advisor import TREND_AGAINST_IDR_PER_MIN, compute_advice
 from market_watcher import MarketWatcher
 from pnl_tracker import PnLTracker
@@ -25,6 +26,13 @@ balance_cache = {"spot_usdt": None, "funding_usdt": None, "total_usdt": None, "u
 # Tracks when the current open rebuy/resell debt first appeared, so the advisor
 # can tell a 5-minute gap from a 3-hour one (ADVISOR_DESIGN.md item 3).
 debt_state = {"side": None, "amount": 0.0, "started_at": None}
+# Manual override for which side the advisor focuses on. The auto-detected
+# side (below) is a lifetime FIFO net-flow heuristic ("bought more than sold
+# => you have spare to sell") - it has no way to know the user is mid-way
+# through a deliberate accumulation target (e.g. "still need to buy $765
+# more") and isn't done buying yet, so it can flip to SELL prematurely.
+# None = auto-detect (default); "BUY"/"SELL" = pinned by the user.
+active_side_state = {"override": None}
 # Manual input - how much IDR is actually sitting in the bank account for paying
 # out BUY-side trades. Not visible via any Binance API, has to be told to us.
 # Caps the BUY ad limit recommendation; SELL limit is capped by USDT balance instead.
@@ -35,6 +43,10 @@ bank_balance_state = {"available_idr": 7_000_000.0, "updated_at": time.time()}
 work_sessions = [{"started_at": bank_balance_state["updated_at"],
                    "opening_balance_idr": bank_balance_state["available_idr"]}]
 
+AUTO_REPRICE_INTERVAL_SECONDS = 30
+AUTO_REPRICE_STATES = ("push", "trend", "debt", "tight", "neutral")  # states with an actionable recommended_price
+repricer = AdRepricer()  # kill switch off by default - /api/auto-reprice POST to enable
+
 
 @app.on_event("startup")
 async def startup():
@@ -42,6 +54,7 @@ async def startup():
     asyncio.create_task(watcher.run_my_ad_forever())
     asyncio.create_task(pnl_refresh_loop())
     asyncio.create_task(balance_refresh_loop())
+    asyncio.create_task(auto_reprice_loop())
 
 
 def _update_debt_state(summary):
@@ -121,6 +134,33 @@ async def pnl_refresh_loop():
         await asyncio.sleep(PNL_REFRESH_SECONDS)
 
 
+async def auto_reprice_loop():
+    """Off by default (repricer.enabled). When on, mirrors exactly what the
+    advisor card already tells the user to do by hand - only fires on the
+    same actionable states/recommended_price the dashboard shows, never on
+    its own separate judgment. AdRepricer enforces the actual safety bounds
+    (max delta, cooldown); this loop just decides *whether* to call it."""
+    while True:
+        try:
+            if repricer.enabled:
+                inputs = _advice_inputs()
+                result = compute_advice(lang="ru", **inputs)
+                my_ad = inputs["my_ad"]
+                rec_price = result.get("recommended_price")
+                if (
+                    result["state"] in AUTO_REPRICE_STATES
+                    and my_ad
+                    and my_ad.get("adv_no")
+                    and rec_price is not None
+                    and abs(rec_price - my_ad["price"]) >= 1
+                ):
+                    ok, msg = await repricer.reprice(my_ad["adv_no"], my_ad["price"], rec_price)
+                    print(f"[auto_reprice] state={result['state']} ok={ok}: {msg}")
+        except Exception as e:
+            print(f"[auto_reprice] loop error: {e}")
+        await asyncio.sleep(AUTO_REPRICE_INTERVAL_SECONDS)
+
+
 @app.get("/api/orderbook")
 async def orderbook():
     snap = watcher.latest
@@ -158,6 +198,38 @@ async def pnl():
             row["unrealized_profit_idr"] = None
         enriched.append(row)
     return {**pnl_cache, "cycles": enriched}
+
+
+@app.get("/api/active-side")
+async def get_active_side():
+    return {"override": active_side_state["override"], "auto_detected": debt_state["side"]}
+
+
+@app.post("/api/active-side")
+async def set_active_side(request: Request):
+    body = await request.json()
+    side = body.get("override")
+    if side not in (None, "BUY", "SELL"):
+        return {"error": "override must be null, 'BUY', or 'SELL'"}
+    active_side_state["override"] = side
+    return {"override": active_side_state["override"]}
+
+
+@app.get("/api/auto-reprice")
+async def get_auto_reprice():
+    return {
+        "enabled": repricer.enabled,
+        "max_delta_idr": repricer.max_delta_idr,
+        "cooldown_sec": repricer.cooldown_sec,
+        "last_result": repricer.last_result,
+    }
+
+
+@app.post("/api/auto-reprice")
+async def set_auto_reprice(request: Request):
+    body = await request.json()
+    repricer.enabled = bool(body.get("enabled", False))
+    return {"enabled": repricer.enabled}
 
 
 @app.get("/api/balance")
@@ -244,11 +316,18 @@ async def earnings():
     }
 
 
-@app.get("/api/advice")
-async def advice(lang: str = "ru"):
+def _advice_inputs():
+    """Shared by /api/advice and the auto-reprice loop, so both branch on
+    exactly the same active-side/price-target logic - the loop must never
+    decide based on stale or differently-derived numbers than what the
+    dashboard is showing."""
     now = time.time()
 
-    if debt_state["side"] == "BUY":
+    if active_side_state["override"] in ("BUY", "SELL"):
+        active_side = active_side_state["override"]
+        my_ad = watcher.my_buy_ad if active_side == "BUY" else watcher.my_sell_ad
+        my_ad_changed_at = watcher.my_buy_ad_changed_at if active_side == "BUY" else watcher.my_sell_ad_changed_at
+    elif debt_state["side"] == "BUY":
         active_side, my_ad, my_ad_changed_at = "BUY", watcher.my_buy_ad, watcher.my_buy_ad_changed_at
     elif debt_state["side"] == "SELL":
         active_side, my_ad, my_ad_changed_at = "SELL", watcher.my_sell_ad, watcher.my_sell_ad_changed_at
@@ -261,7 +340,6 @@ async def advice(lang: str = "ru"):
             active_side, my_ad, my_ad_changed_at = "BUY", watcher.my_buy_ad, watcher.my_buy_ad_changed_at
 
     my_ad_age_min = (now - my_ad_changed_at) / 60 if my_ad_changed_at else None
-
     debt_age_min = (now - debt_state["started_at"]) / 60 if debt_state["started_at"] else None
 
     cycles = pnl_cache.get("cycles") or []
@@ -280,24 +358,32 @@ async def advice(lang: str = "ru"):
     market_trend = watcher.price_trend_idr_per_min(velocity_side)
     market_speed = abs(market_trend) if market_trend is not None else None
 
-    result = compute_advice(
-        active_side=active_side,
-        baseline_price=baseline_price,
-        aggressive_price=aggressive_price,
-        my_ad=my_ad,
-        my_ad_age_min=my_ad_age_min,
-        spread_pct=snap.spread_pct,
-        debt_amount=debt_state["amount"],
-        debt_age_min=debt_age_min,
-        minutes_since_fill=minutes_since_fill,
-        market_speed_idr_per_min=market_speed,
-        market_trend_idr_per_min=market_trend,
-        lang=lang,
-    )
-    result["debt_age_min"] = debt_age_min
-    result["my_ad_age_min"] = my_ad_age_min
-    result["minutes_since_fill"] = minutes_since_fill
-    result["market_speed_idr_per_min"] = market_speed
+    return {
+        "active_side": active_side,
+        "baseline_price": baseline_price,
+        "aggressive_price": aggressive_price,
+        "my_ad": my_ad,
+        "my_ad_age_min": my_ad_age_min,
+        "spread_pct": snap.spread_pct,
+        "debt_amount": debt_state["amount"],
+        "debt_age_min": debt_age_min,
+        "minutes_since_fill": minutes_since_fill,
+        "market_speed_idr_per_min": market_speed,
+        "market_trend_idr_per_min": market_trend,
+    }
+
+
+@app.get("/api/advice")
+async def advice(lang: str = "ru"):
+    inputs = _advice_inputs()
+    active_side = inputs["active_side"]
+    market_trend = inputs["market_trend_idr_per_min"]
+
+    result = compute_advice(lang=lang, **inputs)
+    result["debt_age_min"] = inputs["debt_age_min"]
+    result["my_ad_age_min"] = inputs["my_ad_age_min"]
+    result["minutes_since_fill"] = inputs["minutes_since_fill"]
+    result["market_speed_idr_per_min"] = inputs["market_speed_idr_per_min"]
     result["market_trend_idr_per_min"] = market_trend
     # Language-neutral codes ("up"/"down"/"flat"/"unknown") - the frontend
     # translates these for display. Indicator is independent of which advice

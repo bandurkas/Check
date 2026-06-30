@@ -262,6 +262,7 @@ class MarketWatcher:
                 return {
                     "rank": i + 1,
                     "total": len(items),
+                    "adv_no": adv.get("advNo"),
                     "price": float(adv["price"]),
                     "available": float(adv.get("surplusAmount") or adv.get("tradableQuantity") or 0),
                     "min_limit": float(adv.get("minSingleTransAmount") or 0),

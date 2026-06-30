@@ -56,6 +56,8 @@ body{
 .lang-toggle{ display:flex; border:1px solid var(--line-bright); border-radius:2px; overflow:hidden; font-family:var(--mono); font-size:10.5px; }
 .lang-toggle button{ background:var(--bg-panel); color:var(--ink-faint); border:none; padding:4px 8px; cursor:pointer; font-family:inherit; font-size:inherit; letter-spacing:.04em; }
 .lang-toggle button.active{ background:var(--amber); color:#1a1305; font-weight:600; }
+.side-override-btn{ background:var(--bg-panel); color:var(--ink-faint); border:1px solid var(--line-bright); border-radius:2px; padding:2px 8px; cursor:pointer; font-family:var(--mono); font-size:11px; letter-spacing:.04em; }
+.side-override-btn.active{ background:var(--amber); color:#1a1305; font-weight:600; border-color:var(--amber); }
 
 /* ---------- global klaxon ---------- */
 .klaxon{ display:none; }
@@ -182,6 +184,19 @@ footer{ text-align:center; font-family:var(--mono); font-size:10.5px; color:var(
     <div class="advice-price" id="advice-price-wrap" style="display:none"><span class="cur">Rp</span><span id="advice-price">—</span></div>
     <ul class="advice-reasons" id="advice-reasons"></ul>
     <div class="trend-strip flat" id="trend-strip"><span class="arrow">→</span><span id="trend-text" data-i18n="trend_loading">копим историю рынка…</span></div>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:13px">
+      <span data-i18n="active_side_label">Сторона:</span>
+      <button type="button" class="side-override-btn" data-side="">Auto</button>
+      <button type="button" class="side-override-btn" data-side="BUY">BUY</button>
+      <button type="button" class="side-override-btn" data-side="SELL">SELL</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="auto-reprice-checkbox">
+        <span data-i18n="auto_reprice_label">Авто-перестановка цены</span>
+      </label>
+      <span id="auto-reprice-status"></span>
+    </div>
   </section>
 
   <section class="gauges">
@@ -259,6 +274,10 @@ footer{ text-align:center; font-family:var(--mono); font-size:10.5px; color:var(
 const I18N = {
   ru: {
     advice_now: "Совет сейчас", loading: "Загрузка…", trend_loading: "копим историю рынка…",
+    active_side_label: "Сторона:",
+    auto_reprice_label: "Авто-перестановка цены",
+    auto_reprice_on: "включено · {msg}", auto_reprice_off: "выключено",
+    auto_reprice_tripped: "⚠ остановлено автоматически: {msg}",
     gauge_hourly: "$ / час", gauge_visibility: "Видимость", gauge_spread: "Спред",
     ref_sell: "Sell · продать", ref_buy: "Buy · купить",
     bank_placeholder: "Банк, IDR", save: "Сохр.", balance: "Баланс",
@@ -294,6 +313,10 @@ const I18N = {
   },
   en: {
     advice_now: "Advice now", loading: "Loading…", trend_loading: "gathering market history…",
+    active_side_label: "Side:",
+    auto_reprice_label: "Auto-reprice",
+    auto_reprice_on: "on · {msg}", auto_reprice_off: "off",
+    auto_reprice_tripped: "⚠ auto-disabled: {msg}",
     gauge_hourly: "$ / hour", gauge_visibility: "Visibility", gauge_spread: "Spread",
     ref_sell: "Sell · post ask", ref_buy: "Buy · post bid",
     bank_placeholder: "Bank, IDR", save: "Save", balance: "Balance",
@@ -366,6 +389,43 @@ let bankBalanceIdr = null;
 let lastBuyAdMaxLimit = null;
 let lastAdvicePrice = null;
 let lastHourly = null;
+
+/* ---------- fill sound (coins) ----------
+   Synthesized, not an audio file - browsers won't let a tab make sound
+   before the user has clicked something on the page at least once, so
+   the very first fill after a fresh page load may be silent until that
+   happens. */
+let audioCtx = null;
+let lastTradeCount = null;
+function unlockAudio(){
+  if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if(audioCtx.state === "suspended") audioCtx.resume();
+}
+document.addEventListener("click", unlockAudio, {once: true});
+
+function playCoinSound(){
+  if(!audioCtx) return;
+  const now = audioCtx.currentTime;
+  const blip = (freq, t0, dur, type, peak) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+  };
+  blip(988, now, 0.10, "square", 0.18);          // classic two-note "cha-ching"
+  blip(1568, now + 0.06, 0.16, "square", 0.18);
+  for(let i = 0; i < 7; i++){                     // coins clattering after
+    const t0 = now + 0.15 + i * 0.045 + Math.random() * 0.02;
+    const freq = 1800 + Math.random() * 1400;
+    blip(freq, t0, 0.07, "triangle", 0.08);
+  }
+}
 
 /* ---------- orderbook ---------- */
 async function refreshOrderbook(){
@@ -499,6 +559,65 @@ async function refreshAdvice(){
   }
 }
 
+/* ---------- active side override ---------- */
+async function refreshActiveSideOverride(){
+  try{
+    const r = await fetch("/api/active-side");
+    const d = await r.json();
+    document.querySelectorAll(".side-override-btn").forEach(btn => {
+      const side = btn.dataset.side || null;
+      btn.classList.toggle("active", side === d.override);
+    });
+  } catch(e){ /* non-critical - just leaves buttons in last-known state */ }
+}
+document.querySelectorAll(".side-override-btn").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    const side = btn.dataset.side || null;
+    await fetch("/api/active-side", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({override: side}),
+    });
+    await refreshActiveSideOverride();
+    refreshAdvice();
+  });
+});
+
+/* ---------- auto-reprice toggle ---------- */
+let autoRepriceSyncing = false;
+async function refreshAutoReprice(){
+  try{
+    const r = await fetch("/api/auto-reprice");
+    const d = await r.json();
+    const checkbox = document.getElementById("auto-reprice-checkbox");
+    autoRepriceSyncing = true;
+    checkbox.checked = !!d.enabled;
+    autoRepriceSyncing = false;
+    const statusEl = document.getElementById("auto-reprice-status");
+    if(!d.enabled && d.last_result && d.last_result.message && !d.last_result.ok && checkbox.dataset.wasOn === "1"){
+      // Kill switch tripped itself mid-flight (e.g. a verification challenge) - surface it loudly.
+      statusEl.innerHTML = `<span class="neg">${t("auto_reprice_tripped", {msg: d.last_result.message})}</span>`;
+    } else if(d.enabled){
+      const msg = d.last_result ? d.last_result.message : "";
+      statusEl.textContent = t("auto_reprice_on", {msg});
+    } else {
+      statusEl.textContent = t("auto_reprice_off");
+    }
+    checkbox.dataset.wasOn = d.enabled ? "1" : "0";
+  } catch(e){
+    document.getElementById("auto-reprice-status").textContent = "⚠ " + e;
+  }
+}
+document.getElementById("auto-reprice-checkbox").addEventListener("change", async (e) => {
+  if(autoRepriceSyncing) return;
+  await fetch("/api/auto-reprice", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({enabled: e.target.checked}),
+  });
+  refreshAutoReprice();
+});
+
 /* ---------- earnings ---------- */
 async function refreshEarnings(){
   try{
@@ -529,6 +648,8 @@ async function refreshPnl(){
     if(d.error){ document.getElementById("pnl-summary").textContent = t("pnl_error", {e: d.error}); return; }
     if(!d.summary) return;
     const s = d.summary;
+    if(lastTradeCount !== null && s.total_trades > lastTradeCount) playCoinSound();
+    lastTradeCount = s.total_trades;
     const cls = s.realized_pnl_idr >= 0 ? "pos" : "neg";
     const pnlSpan = `<span class="${cls}">Rp ${fmt(Math.round(s.realized_pnl_idr))}</span>`;
     let html = t("pnl_summary", {pnl: pnlSpan, cycles: s.matched_cycles, trades: s.total_trades});
@@ -630,13 +751,15 @@ async function refreshWorkSession(){
 }
 
 /* ---------- boot ---------- */
-refreshOrderbook(); refreshAdvice(); refreshEarnings(); refreshPnl(); refreshBalance(); refreshBankBalance(); refreshWorkSession();
+refreshOrderbook(); refreshAdvice(); refreshEarnings(); refreshPnl(); refreshBalance(); refreshBankBalance(); refreshWorkSession(); refreshAutoReprice(); refreshActiveSideOverride();
 setInterval(refreshOrderbook, 4000);
 setInterval(refreshAdvice, 10000);
 setInterval(refreshBalance, 60000);
 setInterval(refreshPnl, 90000);
 setInterval(refreshEarnings, 90000);
 setInterval(refreshWorkSession, 90000);
+setInterval(refreshAutoReprice, 15000);
+setInterval(refreshActiveSideOverride, 15000);
 </script>
 </body>
 </html>
