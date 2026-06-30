@@ -280,6 +280,12 @@ async def get_auto_reprice():
         "max_delta_idr": repricer.max_delta_idr,
         "cooldown_sec": repricer.cooldown_sec,
         "last_result": repricer.last_result,
+        # Mirrors the gates auto_reprice_loop actually checks, so the dashboard
+        # can say *why* "enabled" isn't currently doing anything instead of
+        # looking like it's silently broken (code review finding, 2026-07-01).
+        "order_watch_enabled": order_watch_state["enabled"],
+        "pnl_ready": pnl_cache["summary"] is not None,
+        "has_pending_order": order_watcher.has_pending(),
     }
 
 

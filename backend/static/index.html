@@ -117,6 +117,13 @@ body{
 .trend-strip.with{ border-color:rgba(45,226,197,.35); background:rgba(45,226,197,.06); color:#bdf2e8; }
 .trend-strip.flat{ color:var(--ink-faint); }
 
+/* ---------- automation row (auto-reprice + order-watch, grouped since
+   they gate each other - see auto_reprice_loop in main.py) ---------- */
+.auto-row{ margin-top:12px; padding-top:10px; border-top:1px dashed var(--line); display:grid; grid-template-columns:auto 1fr; column-gap:10px; row-gap:5px; align-items:center; }
+.auto-row-eyebrow{ grid-column:1/-1; font-family:var(--disp); font-weight:600; letter-spacing:.14em; text-transform:uppercase; font-size:10px; color:var(--ink-faint); margin-bottom:2px; }
+.auto-toggle{ display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; white-space:nowrap; }
+.auto-toggle-status{ font-family:var(--mono); font-size:11px; color:var(--ink-dim); }
+
 /* ---------- gauge row ---------- */
 .gauges{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
 .gauge{ padding:12px 10px; }
@@ -203,12 +210,18 @@ footer{ text-align:center; font-family:var(--mono); font-size:10.5px; color:var(
       <button type="button" class="side-override-btn" data-side="BUY">BUY</button>
       <button type="button" class="side-override-btn" data-side="SELL">SELL</button>
     </div>
-    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px">
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+    <div class="auto-row">
+      <div class="auto-row-eyebrow" data-i18n="automation_title">Автоматика</div>
+      <label class="auto-toggle">
         <input type="checkbox" id="auto-reprice-checkbox">
         <span data-i18n="auto_reprice_label">Авто-перестановка цены</span>
       </label>
-      <span id="auto-reprice-status"></span>
+      <div class="auto-toggle-status" id="auto-reprice-status"></div>
+      <label class="auto-toggle">
+        <input type="checkbox" id="order-watch-checkbox">
+        <span data-i18n="order_watch_label">Слежение за ордерами</span>
+      </label>
+      <div class="auto-toggle-status" id="order-watch-status"></div>
     </div>
   </section>
 
@@ -289,9 +302,16 @@ const I18N = {
   ru: {
     advice_now: "Совет сейчас", loading: "Загрузка…", trend_loading: "копим историю рынка…",
     active_side_label: "Сторона:",
+    automation_title: "Автоматика",
     auto_reprice_label: "Авто-перестановка цены",
     auto_reprice_on: "включено · {msg}", auto_reprice_off: "выключено",
     auto_reprice_tripped: "⚠ остановлено автоматически: {msg}",
+    auto_reprice_paused_watch_off: "⏸ ждёт: слежение за ордерами выключено",
+    auto_reprice_paused_pnl: "⏸ ждёт: данные P&L ещё не готовы",
+    auto_reprice_paused_pending: "⏸ ждёт: открыт ордер, идёт оплата",
+    order_watch_label: "Слежение за ордерами",
+    order_watch_on: "включено", order_watch_off: "выключено",
+    order_watch_pending: "включено · ордер на оплате",
     gauge_hourly: "$ / час", gauge_visibility: "Видимость", gauge_spread: "Спред",
     ref_sell: "Sell · продать", ref_buy: "Buy · купить",
     bank_placeholder: "Банк, IDR", save: "Сохр.", balance: "Баланс",
@@ -331,9 +351,16 @@ const I18N = {
   en: {
     advice_now: "Advice now", loading: "Loading…", trend_loading: "gathering market history…",
     active_side_label: "Side:",
+    automation_title: "Automation",
     auto_reprice_label: "Auto-reprice",
     auto_reprice_on: "on · {msg}", auto_reprice_off: "off",
     auto_reprice_tripped: "⚠ auto-disabled: {msg}",
+    auto_reprice_paused_watch_off: "⏸ waiting: order watch is off",
+    auto_reprice_paused_pnl: "⏸ waiting: P&L data not ready yet",
+    auto_reprice_paused_pending: "⏸ waiting: an order is open for payment",
+    order_watch_label: "Order watch",
+    order_watch_on: "on", order_watch_off: "off",
+    order_watch_pending: "on · order in payment window",
     gauge_hourly: "$ / hour", gauge_visibility: "Visibility", gauge_spread: "Spread",
     ref_sell: "Sell · post ask", ref_buy: "Buy · post bid",
     bank_placeholder: "Bank, IDR", save: "Save", balance: "Balance",
@@ -644,6 +671,14 @@ async function refreshAutoReprice(){
     if(!d.enabled && d.last_result && d.last_result.message && !d.last_result.ok && checkbox.dataset.wasOn === "1"){
       // Kill switch tripped itself mid-flight (e.g. a verification challenge) - surface it loudly.
       statusEl.innerHTML = `<span class="neg">${t("auto_reprice_tripped", {msg: d.last_result.message})}</span>`;
+    } else if(d.enabled && !d.order_watch_enabled){
+      // Gated off by auto_reprice_loop (main.py) even though the toggle is "on" -
+      // make that visible instead of letting it look like silent inaction.
+      statusEl.innerHTML = `<span class="warn-c">${t("auto_reprice_paused_watch_off")}</span>`;
+    } else if(d.enabled && !d.pnl_ready){
+      statusEl.innerHTML = `<span class="warn-c">${t("auto_reprice_paused_pnl")}</span>`;
+    } else if(d.enabled && d.has_pending_order){
+      statusEl.innerHTML = `<span class="warn-c">${t("auto_reprice_paused_pending")}</span>`;
     } else if(d.enabled){
       const msg = d.last_result ? d.last_result.message : "";
       statusEl.textContent = t("auto_reprice_on", {msg});
@@ -663,6 +698,40 @@ document.getElementById("auto-reprice-checkbox").addEventListener("change", asyn
     body: JSON.stringify({enabled: e.target.checked}),
   });
   refreshAutoReprice();
+});
+
+/* ---------- order-watch toggle ----------
+   Grouped with auto-reprice above because auto_reprice_loop refuses to fire
+   while this is off (a stale has_pending() reading can't be trusted) - the
+   two toggles are read as one "automation" decision, not independent. */
+let orderWatchSyncing = false;
+async function refreshOrderWatch(){
+  try{
+    const r = await fetch("/api/order-watch");
+    const d = await r.json();
+    const checkbox = document.getElementById("order-watch-checkbox");
+    orderWatchSyncing = true;
+    checkbox.checked = !!d.enabled;
+    orderWatchSyncing = false;
+    const statusEl = document.getElementById("order-watch-status");
+    if(d.enabled && lastPendingCount > 0){
+      statusEl.textContent = t("order_watch_pending");
+    } else {
+      statusEl.textContent = d.enabled ? t("order_watch_on") : t("order_watch_off");
+    }
+  } catch(e){
+    document.getElementById("order-watch-status").textContent = "⚠ " + e;
+  }
+}
+document.getElementById("order-watch-checkbox").addEventListener("change", async (e) => {
+  if(orderWatchSyncing) return;
+  await fetch("/api/order-watch", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({enabled: e.target.checked}),
+  });
+  refreshOrderWatch();
+  refreshAutoReprice();  // its pause reason may have just changed
 });
 
 /* ---------- earnings ---------- */
@@ -811,10 +880,12 @@ async function refreshWorkSession(){
 
 /* ---------- pending orders (someone took an ad - 15min to pay) ---------- */
 let openOrderAlerts = [];  // orders we've already shown, so reloading the page doesn't re-list stale ones forever
+let lastPendingCount = 0;  // read by refreshOrderWatch() to flag "on · order in payment window"
 async function refreshPendingOrders(){
   try{
     const r = await fetch("/api/pending-orders");
     const d = await r.json();
+    lastPendingCount = d.pending_count || 0;
     if(d.new_orders && d.new_orders.length){
       openOrderAlerts = openOrderAlerts.concat(d.new_orders);
       playOrderAlertSound();
@@ -836,7 +907,7 @@ async function refreshPendingOrders(){
 }
 
 /* ---------- boot ---------- */
-refreshOrderbook(); refreshAdvice(); refreshEarnings(); refreshPnl(); refreshBalance(); refreshBankBalance(); refreshWorkSession(); refreshAutoReprice(); refreshActiveSideOverride(); refreshPendingOrders();
+refreshOrderbook(); refreshAdvice(); refreshEarnings(); refreshPnl(); refreshBalance(); refreshBankBalance(); refreshWorkSession(); refreshAutoReprice(); refreshOrderWatch(); refreshActiveSideOverride(); refreshPendingOrders();
 setInterval(refreshOrderbook, 4000);
 setInterval(refreshAdvice, 10000);
 setInterval(refreshBalance, 60000);
@@ -844,6 +915,7 @@ setInterval(refreshPnl, 90000);
 setInterval(refreshEarnings, 90000);
 setInterval(refreshWorkSession, 90000);
 setInterval(refreshAutoReprice, 15000);
+setInterval(refreshOrderWatch, 15000);
 setInterval(refreshActiveSideOverride, 15000);
 setInterval(refreshPendingOrders, 6000);
 </script>
