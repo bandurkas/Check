@@ -45,16 +45,33 @@ work_sessions = [{"started_at": bank_balance_state["updated_at"],
                    "opening_balance_idr": bank_balance_state["available_idr"]}]
 
 AUTO_REPRICE_INTERVAL_SECONDS = 60  # slower cadence on request 2026-07-01 - less tab churn, still responsive enough
-AUTO_REPRICE_STATES = ("push", "trend", "debt", "tight", "neutral", "floor")  # states with an actionable recommended_price
+# "floor" intentionally excluded: when the market is below our breakeven the
+# advisor holds the price at cost-basis and there is nothing for auto-reprice
+# to do. Firing anyway just opens a CDP tab for no reason and keeps the
+# browser busy while we're waiting for the market to recover.
+AUTO_REPRICE_STATES = ("push", "trend", "debt", "tight", "neutral")
 repricer = AdRepricer()  # kill switch off by default - /api/auto-reprice POST to enable
 
 ORDER_WATCH_INTERVAL_SECONDS = 30  # orders have a 15-min payment window, this still gives ~14min worst-case lead
 order_watcher = OrderWatcher()
-# Separate kill switch from order_watcher itself - lets main.py stop opening
-# CDP tabs for this entirely (2026-07-01: the combination of this loop +
-# auto-reprice opening tabs back to back looked like the browser flailing,
-# even though each individual action was fine - paused on request).
 order_watch_state = {"enabled": True}
+
+
+def _market_above_breakeven() -> bool:
+    """True when the market's best buy price is above our sell breakeven.
+    Both auto_reprice_loop and order_watch_loop gate on this: while the market
+    is below breakeven the ad sits at the floor price and is not competitive,
+    so there are no orders to watch and no price to chase — opening CDP tabs
+    is wasted browser activity. Returns True when there is no open position
+    (nothing to protect) so the gate never blocks normal operation."""
+    pnl_summary = pnl_cache.get("summary") or {}
+    own_avg_cost = pnl_summary.get("open_tracked_avg_cost_idr")
+    own_open_usdt = pnl_summary.get("open_tracked_usdt")
+    if not (own_open_usdt and own_open_usdt > 1 and own_avg_cost):
+        return True
+    breakeven = own_avg_cost * (1 + ROUND_TRIP_FEE_PCT / 100)
+    market_buy = watcher.latest.robust_buy_price
+    return market_buy is not None and market_buy > breakeven
 
 
 @app.on_event("startup")
@@ -69,21 +86,21 @@ async def startup():
 
 async def order_watch_loop():
     while True:
-        if order_watch_state["enabled"]:
+        if order_watch_state["enabled"] and _market_above_breakeven():
             await order_watcher.poll()
         await asyncio.sleep(ORDER_WATCH_INTERVAL_SECONDS)
 
 
 @app.get("/api/order-watch")
 async def get_order_watch():
-    return order_watch_state
+    return {**order_watch_state, "market_above_breakeven": _market_above_breakeven()}
 
 
 @app.post("/api/order-watch")
 async def set_order_watch(request: Request):
     body = await request.json()
     order_watch_state["enabled"] = bool(body.get("enabled", False))
-    return order_watch_state
+    return {**order_watch_state, "market_above_breakeven": _market_above_breakeven()}
 
 
 @app.get("/api/pending-orders")
@@ -301,6 +318,7 @@ async def get_auto_reprice():
         "order_watch_enabled": order_watch_state["enabled"],
         "pnl_ready": pnl_cache["summary"] is not None,
         "has_pending_order": order_watcher.has_pending(),
+        "market_above_breakeven": _market_above_breakeven(),
     }
 
 

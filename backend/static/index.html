@@ -323,9 +323,11 @@ const I18N = {
     auto_reprice_paused_watch_off: "⏸ ждёт: слежение за ордерами выключено",
     auto_reprice_paused_pnl: "⏸ ждёт: данные P&L ещё не готовы",
     auto_reprice_paused_pending: "⏸ ждёт: открыт ордер, идёт оплата",
+    auto_reprice_paused_below_be: "⏸ ждёт: рынок ниже безубытка",
     order_watch_label: "Слежение за ордерами",
     order_watch_on: "включено", order_watch_off: "выключено",
     order_watch_pending: "включено · ордер на оплате",
+    order_watch_below_be: "включено · рынок ниже безубытка, ждём",
     gauge_hourly: "$ / час", gauge_visibility: "Видимость", gauge_spread: "Спред",
     ref_sell: "Sell · продать", ref_buy: "Buy · купить",
     bank_placeholder: "Банк, IDR", save: "Сохр.", balance: "Баланс",
@@ -374,9 +376,11 @@ const I18N = {
     auto_reprice_paused_watch_off: "⏸ waiting: order watch is off",
     auto_reprice_paused_pnl: "⏸ waiting: P&L data not ready yet",
     auto_reprice_paused_pending: "⏸ waiting: an order is open for payment",
+    auto_reprice_paused_below_be: "⏸ waiting: market below breakeven",
     order_watch_label: "Order watch",
     order_watch_on: "on", order_watch_off: "off",
     order_watch_pending: "on · order in payment window",
+    order_watch_below_be: "on · market below breakeven, waiting",
     gauge_hourly: "$ / hour", gauge_visibility: "Visibility", gauge_spread: "Spread",
     ref_sell: "Sell · post ask", ref_buy: "Buy · post bid",
     bank_placeholder: "Bank, IDR", save: "Save", balance: "Balance",
@@ -689,9 +693,9 @@ async function refreshAutoReprice(){
     if(!d.enabled && d.last_result && d.last_result.message && !d.last_result.ok && checkbox.dataset.wasOn === "1"){
       // Kill switch tripped itself mid-flight (e.g. a verification challenge) - surface it loudly.
       statusEl.innerHTML = `<span class="neg">${t("auto_reprice_tripped", {msg: d.last_result.message})}</span>`;
+    } else if(d.enabled && !d.market_above_breakeven){
+      statusEl.innerHTML = `<span class="warn-c">${t("auto_reprice_paused_below_be")}</span>`;
     } else if(d.enabled && !d.order_watch_enabled){
-      // Gated off by auto_reprice_loop (main.py) even though the toggle is "on" -
-      // make that visible instead of letting it look like silent inaction.
       statusEl.innerHTML = `<span class="warn-c">${t("auto_reprice_paused_watch_off")}</span>`;
     } else if(d.enabled && !d.pnl_ready){
       statusEl.innerHTML = `<span class="warn-c">${t("auto_reprice_paused_pnl")}</span>`;
@@ -734,6 +738,8 @@ async function refreshOrderWatch(){
     const statusEl = document.getElementById("order-watch-status");
     if(d.enabled && lastPendingCount > 0){
       statusEl.textContent = t("order_watch_pending");
+    } else if(d.enabled && d.market_above_breakeven === false){
+      statusEl.textContent = t("order_watch_below_be");
     } else {
       statusEl.textContent = d.enabled ? t("order_watch_on") : t("order_watch_off");
     }
