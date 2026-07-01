@@ -165,6 +165,11 @@ tr.mine td{ color:var(--amber-soft); font-weight:600; }
 .my-status{ margin-top:8px; font-family:var(--mono); font-size:11px; color:var(--ink-faint); padding-top:8px; border-top:1px dashed var(--line); }
 .my-status.found{ color:var(--cyan); }
 
+/* ---------- price chart ---------- */
+.chart-wrap{ margin-bottom:12px; }
+.chart-canvas{ display:block; width:100%; height:140px; }
+.chart-empty{ font-family:var(--mono); font-size:11px; color:var(--ink-faint); padding:18px 0; text-align:center; }
+
 /* ---------- ledger ---------- */
 .ledger{ margin-bottom:12px; }
 .ledger-summary{ font-family:var(--mono); font-size:12px; color:var(--ink-dim); margin-top:8px; line-height:1.8; }
@@ -285,6 +290,15 @@ footer{ text-align:center; font-family:var(--mono); font-size:10.5px; color:var(
     </div>
   </section>
 
+  <section class="panel chart-wrap reveal" style="animation-delay:.32s">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px">
+      <span class="eyebrow" data-i18n="chart_title">График цены · 15 мин</span>
+      <span id="chart-legend" style="font-family:var(--mono);font-size:10px;color:var(--ink-faint)"></span>
+    </div>
+    <canvas id="price-chart" class="chart-canvas"></canvas>
+    <div id="chart-empty" class="chart-empty" style="display:none" data-i18n="chart_empty">копим историю…</div>
+  </section>
+
   <section class="panel ledger reveal" style="animation-delay:.34s">
     <span class="eyebrow" data-i18n="ledger_title">Журнал сделок</span>
     <div class="ledger-summary" id="pnl-summary">—</div>
@@ -318,6 +332,8 @@ const I18N = {
     book_buy_side: "Buy-сторона", book_buy_side_hint: "(где покупаешь ты)",
     book_sell_side: "Sell-сторона", book_sell_side_hint: "(где продаёшь ты)",
     th_price: "Цена", th_merchant: "Мерчант", th_time: "Время", th_side: "Сторона", th_rate: "Курс", th_profit: "Прибыль",
+    chart_title: "График цены · 15 мин", chart_empty: "копим историю…",
+    chart_buy_label: "покупают", chart_sell_label: "продают", chart_be_label: "безубыток",
     ledger_title: "Журнал сделок",
     live: "live", stale: "устарело {s}с — проверь Opera", backend_down: "backend недоступен",
     klaxon: "⚠ Рынок {dir} против тебя — действуй сейчас",
@@ -367,6 +383,8 @@ const I18N = {
     book_buy_side: "Buy side", book_buy_side_hint: "(where you buy)",
     book_sell_side: "Sell side", book_sell_side_hint: "(where you sell)",
     th_price: "Price", th_merchant: "Merchant", th_time: "Time", th_side: "Side", th_rate: "Rate", th_profit: "Profit",
+    chart_title: "Price chart · 15 min", chart_empty: "gathering history…",
+    chart_buy_label: "buyers", chart_sell_label: "sellers", chart_be_label: "breakeven",
     ledger_title: "Trade ledger",
     live: "live", stale: "stale {s}s — check Opera", backend_down: "backend unreachable",
     klaxon: "⚠ Market {dir} against you — act now",
@@ -906,9 +924,140 @@ async function refreshPendingOrders(){
   } catch(e){}
 }
 
+/* ---------- price chart ---------- */
+const CHART_COLORS = {
+  buy:  { line: "#2de2c5", fill: "rgba(45,226,197,.08)" },  // cyan  — sell-side (buy ads = where you sell)
+  sell: { line: "#ffb300", fill: "rgba(255,179,0,.06)"  },  // amber — buy-side (sell ads = where you buy)
+  be:   "#ff3b4e",                                           // red   — breakeven floor
+};
+
+function drawPriceChart(points, breakeven){
+  const canvas = document.getElementById("price-chart");
+  const empty  = document.getElementById("chart-empty");
+  if(!points || points.length < 2){
+    canvas.style.display = "none"; empty.style.display = "block"; return;
+  }
+  canvas.style.display = "block"; empty.style.display = "none";
+
+  // HiDPI
+  const rect  = canvas.getBoundingClientRect();
+  const dpr   = window.devicePixelRatio || 1;
+  canvas.width  = rect.width  * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = rect.height;
+  const PAD = { top: 10, right: 58, bottom: 22, left: 6 };
+  const cW = W - PAD.left - PAD.right;
+  const cH = H - PAD.top  - PAD.bottom;
+
+  // Price range — include breakeven so it's never clipped
+  const allPrices = points.flatMap(p => [p.buy, p.sell].filter(Boolean));
+  if(breakeven) allPrices.push(breakeven);
+  let lo = Math.min(...allPrices), hi = Math.max(...allPrices);
+  const pad = Math.max((hi - lo) * 0.15, 5);
+  lo -= pad; hi += pad;
+
+  const tMin = points[0].t, tMax = points[points.length - 1].t;
+  const xOf = t  => PAD.left + (t - tMin) / (tMax - tMin || 1) * cW;
+  const yOf = p  => PAD.top  + (1 - (p - lo) / (hi - lo)) * cH;
+
+  // Background
+  ctx.clearRect(0, 0, W, H);
+
+  // Subtle horizontal grid lines
+  ctx.strokeStyle = "rgba(34,40,45,.9)";
+  ctx.lineWidth = 1;
+  const ticks = 4;
+  for(let i = 0; i <= ticks; i++){
+    const y = PAD.top + (cH / ticks) * i;
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
+  }
+
+  // Draw a filled area + line for a price series
+  function drawSeries(key, color){
+    const pts = points.filter(p => p[key] != null);
+    if(!pts.length) return;
+    ctx.beginPath();
+    pts.forEach((p, i) => i === 0 ? ctx.moveTo(xOf(p.t), yOf(p[key])) : ctx.lineTo(xOf(p.t), yOf(p[key])));
+    // fill down to bottom
+    ctx.lineTo(xOf(pts[pts.length-1].t), PAD.top + cH);
+    ctx.lineTo(xOf(pts[0].t), PAD.top + cH);
+    ctx.closePath();
+    ctx.fillStyle = color.fill;
+    ctx.fill();
+    ctx.beginPath();
+    pts.forEach((p, i) => i === 0 ? ctx.moveTo(xOf(p.t), yOf(p[key])) : ctx.lineTo(xOf(p.t), yOf(p[key])));
+    ctx.strokeStyle = color.line;
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+  }
+
+  drawSeries("sell", CHART_COLORS.sell);
+  drawSeries("buy",  CHART_COLORS.buy);
+
+  // Breakeven line
+  if(breakeven && breakeven >= lo && breakeven <= hi){
+    const y = yOf(breakeven);
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = CHART_COLORS.be;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right + 4, y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Right-side price labels
+  ctx.font = "500 10px 'IBM Plex Mono', monospace";
+  ctx.textAlign = "left";
+  const lastBuy  = points.filter(p => p.buy  != null).at(-1);
+  const lastSell = points.filter(p => p.sell != null).at(-1);
+  const lx = W - PAD.right + 6;
+  if(lastBuy){
+    ctx.fillStyle = CHART_COLORS.buy.line;
+    ctx.fillText(Math.round(lastBuy.buy), lx, yOf(lastBuy.buy) + 4);
+  }
+  if(lastSell){
+    ctx.fillStyle = CHART_COLORS.sell.line;
+    ctx.fillText(Math.round(lastSell.sell), lx, yOf(lastSell.sell) + 4);
+  }
+  if(breakeven && breakeven >= lo && breakeven <= hi){
+    ctx.fillStyle = CHART_COLORS.be;
+    ctx.fillText(Math.round(breakeven), lx, yOf(breakeven) + 4);
+  }
+
+  // Bottom time labels — start and end
+  ctx.fillStyle = "rgba(74,82,90,.9)";
+  ctx.textAlign = "left";
+  ctx.fillText(new Date(tMin*1000).toLocaleTimeString(lang==="ru"?"ru-RU":"en-GB",{hour:"2-digit",minute:"2-digit"}), PAD.left, H - 5);
+  ctx.textAlign = "right";
+  ctx.fillText(new Date(tMax*1000).toLocaleTimeString(lang==="ru"?"ru-RU":"en-GB",{hour:"2-digit",minute:"2-digit"}), W - PAD.right, H - 5);
+}
+
+async function refreshChart(){
+  try{
+    const r = await fetch("/api/price-history");
+    const d = await r.json();
+    drawPriceChart(d.points, d.breakeven);
+    // Legend
+    const leg = document.getElementById("chart-legend");
+    const parts = [];
+    if(d.points && d.points.length){
+      parts.push(`<span style="color:${CHART_COLORS.buy.line}">${t("chart_buy_label")}</span>`);
+      parts.push(`<span style="color:${CHART_COLORS.sell.line}">${t("chart_sell_label")}</span>`);
+      if(d.breakeven) parts.push(`<span style="color:${CHART_COLORS.be}">${t("chart_be_label")}</span>`);
+    }
+    leg.innerHTML = parts.join(" · ");
+  } catch(e){}
+}
+
+// Redraw on resize (canvas needs explicit size update)
+window.addEventListener("resize", refreshChart);
+
 /* ---------- boot ---------- */
-refreshOrderbook(); refreshAdvice(); refreshEarnings(); refreshPnl(); refreshBalance(); refreshBankBalance(); refreshWorkSession(); refreshAutoReprice(); refreshOrderWatch(); refreshActiveSideOverride(); refreshPendingOrders();
+refreshOrderbook(); refreshAdvice(); refreshEarnings(); refreshPnl(); refreshBalance(); refreshBankBalance(); refreshWorkSession(); refreshAutoReprice(); refreshOrderWatch(); refreshActiveSideOverride(); refreshPendingOrders(); refreshChart();
 setInterval(refreshOrderbook, 4000);
+setInterval(refreshChart, 8000);
 setInterval(refreshAdvice, 10000);
 setInterval(refreshBalance, 60000);
 setInterval(refreshPnl, 90000);

@@ -219,6 +219,21 @@ async def auto_reprice_loop():
         await asyncio.sleep(AUTO_REPRICE_INTERVAL_SECONDS)
 
 
+@app.get("/api/price-history")
+async def price_history():
+    rows = list(watcher._price_history)
+    pnl_summary = pnl_cache.get("summary") or {}
+    own_avg_cost = pnl_summary.get("open_tracked_avg_cost_idr")
+    own_open_usdt = pnl_summary.get("open_tracked_usdt")
+    has_position = own_open_usdt is not None and own_open_usdt > 1
+    breakeven = (own_avg_cost * (1 + ROUND_TRIP_FEE_PCT / 100)
+                 if has_position and own_avg_cost else None)
+    return {
+        "points": [{"t": r[0], "buy": r[1], "sell": r[2]} for r in rows],
+        "breakeven": breakeven,
+    }
+
+
 @app.get("/api/orderbook")
 async def orderbook():
     snap = watcher.latest
