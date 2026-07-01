@@ -12,22 +12,31 @@ from fastapi.responses import HTMLResponse
 from ad_repricer import AdRepricer
 from advisor import TREND_AGAINST_IDR_PER_MIN, WIDE_SPREAD_PCT, ROUND_TRIP_FEE_PCT
 from advisor import compute_advice as _rule_compute_advice
-from advisor_llm import compute_advice_llm as _llm_compute_advice
+from advisor_llm import compute_advice_llm_async as _llm_compute_advice_async
 from market_watcher import MarketWatcher
 from order_watcher import OrderWatcher
 from pnl_tracker import PnLTracker
 
-# Phase 1 (proving profitability) runs on the deterministic, auditable rule-based
-# advisor — the engine verified against real trades 2026-07-01: every sell >= its
-# fee-aware floor profited, every sell < floor lost, no exceptions. The LLM advisor
-# is preserved for Phase 2 but OFF by default for two reasons proven this session:
-# (1) it is non-deterministic on a money-moving price, and (2) it uses a SYNCHRONOUS
-# anthropic client called from async handlers with no timeout — under rate-limiting
-# it blocks the single event loop, freezing market/pnl/order polling and leaving the
-# dashboard showing a stale price (the "18005 frozen while market moved" incident).
-# Flip USE_LLM_ADVISOR=1 only once the Phase-2 plan makes the LLM path async-safe.
+# USE_LLM_ADVISOR turns on the async-safe LLM advisor. It uses AsyncAnthropic with
+# a timeout (no event-loop blocking — the "18005 frozen" incident cause) and falls
+# back to the deterministic rule-based advisor on any failure. When on it feeds:
+#   - the DISPLAY endpoints (/api/advice, /api/agent) via compute_advice_display();
+#   - the auto-reprice hot path, but ONLY when the market is above breakeven (our
+#     zone of interest, where there's a real "sell higher" decision) — see
+#     auto_reprice_loop. Below breakeven the deterministic advisor holds the floor
+#     and no LLM request is spent. The independent breakeven guard in the loop is
+#     the final safety net regardless of which advisor produced the price.
 USE_LLM_ADVISOR = os.environ.get("USE_LLM_ADVISOR", "").lower() in ("1", "true", "yes")
-compute_advice = _llm_compute_advice if USE_LLM_ADVISOR else _rule_compute_advice
+
+
+async def compute_advice_display(*, lang="ru", **inputs):
+    """Advice for the dashboard. Uses the async LLM advisor only inside our zone of
+    interest (market above breakeven) — same gate as the auto-reprice hot path, so
+    no LLM request is spent below breakeven where the answer is always the
+    deterministic floor. Falls back to rule-based internally on any error."""
+    if USE_LLM_ADVISOR and _market_above_breakeven():
+        return await _llm_compute_advice_async(lang=lang, orderbook=_orderbook_for_llm(), **inputs)
+    return _rule_compute_advice(lang=lang, **inputs)
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -93,6 +102,38 @@ def _market_above_breakeven() -> bool:
     breakeven = own_avg_cost * (1 + ROUND_TRIP_FEE_PCT / 100)
     market_buy = watcher.latest.robust_buy_price
     return market_buy is not None and market_buy > breakeven
+
+
+_ORDERBOOK_DEPTH = 20  # levels per side fed to the LLM (watcher fetches 20)
+
+
+def _orderbook_for_llm() -> dict:
+    """The live order book for the LLM to read when deciding a price. ask_ladder =
+    sellers of USDT (ascending price; our competition on a SELL), bid_ladder =
+    buyers of USDT (descending; the demand that fills a SELL). Each level carries
+    the full watcher fields (price/available/limits/merchant) so the model can
+    weigh depth, not just top-of-book."""
+    snap = watcher.latest
+
+    def _levels(ads):
+        return [
+            {"price": a["price"], "available": a.get("available"),
+             "min_limit": a.get("min_limit"), "max_limit": a.get("max_limit"),
+             "merchant": a.get("merchant")}
+            for a in ads[:_ORDERBOOK_DEPTH]
+        ]
+
+    return {
+        "timestamp": snap.timestamp,
+        "ask_ladder": _levels(snap.buy_ads),
+        "bid_ladder": _levels(snap.sell_ads),
+        "best_ask": snap.best_buy_price,
+        "best_bid": snap.best_sell_price,
+        "robust_ask": snap.robust_buy_price,
+        "robust_bid": snap.robust_sell_price,
+        "spread_idr": snap.spread_idr,
+        "spread_pct": snap.spread_pct,
+    }
 
 
 @app.on_event("startup")
@@ -284,7 +325,18 @@ async def auto_reprice_loop():
                 print(f"[auto_reprice] skipping: market data is {st['market_age_sec']}s stale (limit {MARKET_STALE_SECONDS}s)")
             if repricer.enabled and order_watch_state["enabled"] and pnl_ready and market_ready and not order_watcher.has_pending():
                 inputs = _advice_inputs()
-                result = compute_advice(lang="ru", **inputs)
+                # The LLM decides the price ONLY inside our zone of interest — the
+                # market above breakeven, where there is a real "sell higher"
+                # choice (read the book, weigh factors). Below breakeven the
+                # deterministic advisor returns state=floor (not in
+                # AUTO_REPRICE_STATES), so nothing reprices and no LLM request is
+                # spent chasing a price we would never set. The independent
+                # breakeven guard below still applies regardless of which advisor
+                # produced the price.
+                if USE_LLM_ADVISOR and _market_above_breakeven():
+                    result = await _llm_compute_advice_async(lang="ru", orderbook=_orderbook_for_llm(), **inputs)
+                else:
+                    result = _rule_compute_advice(lang="ru", **inputs)
                 my_ad = inputs["my_ad"]
                 rec_price = result.get("recommended_price")
                 if (
@@ -660,7 +712,7 @@ async def advice(lang: str = "ru"):
     active_side = inputs["active_side"]
     market_trend = inputs["market_trend_idr_per_min"]
 
-    result = compute_advice(lang=lang, **inputs)
+    result = await compute_advice_display(lang=lang, **inputs)
     result["debt_age_min"] = inputs["debt_age_min"]
     result["my_ad_age_min"] = inputs["my_ad_age_min"]
     result["minutes_since_fill"] = inputs["minutes_since_fill"]
@@ -905,9 +957,9 @@ def _build_instruction(advice: dict, inputs: dict, pending_orders: list) -> dict
     }
 
 
-def _agent_payload(lang: str = "ru") -> dict:
+async def _agent_payload(lang: str = "ru") -> dict:
     inputs = _advice_inputs()
-    advice = compute_advice(lang=lang, **inputs)
+    advice = await compute_advice_display(lang=lang, **inputs)
     pending = list(order_watcher.seen_order_numbers)  # proxy: count of open orders
     pending_orders = [{"id": oid} for oid in pending] if order_watcher.has_pending() else []
     instruction = _build_instruction(advice, inputs, pending_orders)
@@ -920,7 +972,7 @@ def _agent_payload(lang: str = "ru") -> dict:
 
 @app.get("/api/agent")
 async def get_agent(lang: str = "ru"):
-    return _agent_payload(lang)
+    return await _agent_payload(lang)
 
 
 @app.post("/api/agent/done")
@@ -943,7 +995,7 @@ async def agent_done(request: Request):
     if action == "trade_done" and not skipped:
         trade_event["acknowledged"] = True
     await _force_pnl_refresh()
-    return _agent_payload(lang)
+    return await _agent_payload(lang)
 
 
 @app.get("/", response_class=HTMLResponse)
