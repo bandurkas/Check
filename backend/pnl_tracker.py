@@ -25,6 +25,30 @@ class PnLTracker:
         self.api_secret = api_secret
         self.seen_order_numbers = set()
         self.cycles = []  # list of {time, side, asset, fiat, amount, unit_price, total}
+        # Manual USDT transfers OUT of the trading balance (withdrawals / moves to
+        # another wallet). These are NOT trades - no IDR changes hands, no P&L is
+        # realized - but they DO remove inventory, so FIFO must consume the oldest
+        # open buy lots or the tracked open position drifts above the real balance.
+        # Each: {time, side:"WITHDRAW", amount}. Loaded from an external file on the
+        # VPS (Binance's trade history has no record of an internal transfer).
+        self.withdrawals = []
+
+    def add_withdrawal(self, usdt: float, time_ms: int = None, note: str = ""):
+        self.withdrawals.append({
+            "time": int(time_ms) if time_ms is not None else int(time.time() * 1000),
+            "side": "WITHDRAW",
+            "asset": "USDT",
+            "amount": float(usdt),
+            "note": note,
+        })
+
+    def _events(self):
+        """Trades and withdrawals merged into one time-ordered event stream -
+        the single source the FIFO walks so a withdrawal removes the oldest
+        still-open lots exactly like a sell would (minus the P&L)."""
+        merged = list(self.cycles) + list(self.withdrawals)
+        merged.sort(key=lambda t: t["time"])
+        return merged
 
     def _signed_get(self, path: str, params: dict):
         params = dict(params)
@@ -100,6 +124,18 @@ class PnLTracker:
                     "amount": c["amount"], "unit_price": c["unit_price"],
                     "fee_per_unit_idr": PnLTracker._fee_per_unit_idr(c),
                 })
+            elif c["side"] == "WITHDRAW":
+                # Remove inventory oldest-first, no proceeds => no realized P&L
+                # and it is not a "matched cycle". Any amount beyond the tracked
+                # queue was untracked balance and is simply dropped.
+                remaining = c["amount"]
+                while remaining > 1e-9 and buy_queue:
+                    lot = buy_queue[0]
+                    take = min(remaining, lot["amount"])
+                    lot["amount"] -= take
+                    remaining -= take
+                    if lot["amount"] <= 1e-9:
+                        buy_queue.pop(0)
             else:
                 remaining = c["amount"]
                 sell_unit = c["unit_price"]
@@ -142,6 +178,18 @@ class PnLTracker:
                 row["profit_idr"] = None
                 row["unmatched_usdt"] = 0.0
                 row["open_usdt"] = 0.0
+            elif c["side"] == "WITHDRAW":
+                remaining = c["amount"]
+                while remaining > 1e-9 and buy_queue:
+                    lot = buy_queue[0]
+                    take = min(remaining, lot["amount"])
+                    lot["amount"] -= take
+                    remaining -= take
+                    if lot["amount"] <= 1e-9:
+                        buy_queue.pop(0)
+                row["profit_idr"] = None
+                row["unmatched_usdt"] = 0.0
+                row["open_usdt"] = 0.0
             else:
                 remaining = c["amount"]
                 sell_unit = c["unit_price"]
@@ -169,8 +217,7 @@ class PnLTracker:
     def annotated_cycles(self):
         """self.cycles (raw trades) with per-row profit_idr filled in - what
         the dashboard ledger table renders instead of bare totals."""
-        events = sorted(self.cycles, key=lambda c: c["time"])
-        return self._fifo_annotate(events)
+        return self._fifo_annotate(self._events())
 
     @staticmethod
     def _open_position(lots):
@@ -180,7 +227,7 @@ class PnLTracker:
         return round(usdt, 4), avg_cost
 
     def summary(self):
-        events = sorted(self.cycles, key=lambda c: c["time"])
+        events = self._events()
         realized_pnl, matched_cycles, unmatched_sell_usdt, open_lots = self._fifo_match(events)
         open_tracked_usdt, open_tracked_avg_cost = self._open_position(open_lots)
 

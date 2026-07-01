@@ -52,7 +52,9 @@ body{padding-bottom:56px}
 .klaxon.show{display:flex;align-items:center;justify-content:center;margin-bottom:10px;padding:10px 14px;border:1px solid var(--red);background:rgba(255,59,78,.10);color:#ffd5d8;font-family:var(--disp);font-weight:700;font-size:14px;letter-spacing:.06em;text-transform:uppercase;border-radius:4px;animation:pulse-red 1.2s ease-in-out infinite}
 .order-alert{display:none}
 .order-alert.show{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;padding:12px 14px;border:1px solid var(--amber);background:rgba(255,179,0,.10);color:#ffe8a8;font-family:var(--disp);font-weight:700;font-size:14px;border-radius:4px;animation:pulse-amber 1.2s ease-in-out infinite}
-.oa-row{font-weight:400;font-size:12px;opacity:.85}
+.oa-row{font-weight:400;font-size:12px;opacity:.85;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 0}
+.oa-row .oa-done{background:rgba(45,226,197,.14);border:1px solid rgba(45,226,197,.45);color:var(--cyan);font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:3px;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.oa-row .oa-done:hover{background:rgba(45,226,197,.26)}
 @keyframes pulse-red{0%,100%{box-shadow:0 0 0 rgba(255,59,78,0)}50%{box-shadow:0 0 20px rgba(255,59,78,.4)}}
 @keyframes pulse-amber{0%,100%{box-shadow:0 0 0 rgba(255,179,0,0)}50%{box-shadow:0 0 20px rgba(255,179,0,.35)}}
 
@@ -61,6 +63,7 @@ body{padding-bottom:56px}
 #advice-panel.state-push{border-color:rgba(255,179,0,.45)}
 #advice-panel.state-trend,#advice-panel.state-urgent{border-color:rgba(255,59,78,.6);animation:pulse-red 1.3s ease-in-out infinite}
 #advice-panel.state-wide,#advice-panel.state-floor{border-color:rgba(45,226,197,.4)}
+#advice-panel.state-stale{border-color:rgba(255,59,78,.85);background:rgba(255,59,78,.08);animation:pulse-red 1.3s ease-in-out infinite}
 .advice-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
 .side-badge{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.1em;padding:2px 8px;border-radius:2px;background:var(--raised);color:var(--dim)}
 .side-badge.SELL{background:rgba(255,59,78,.15);color:#ff8899}
@@ -130,6 +133,10 @@ body{padding-bottom:56px}
 
 /* session / balance */
 .session-line{font-family:var(--mono);font-size:11.5px;color:var(--dim);line-height:1.7;margin-top:4px}
+.scorecard{font-family:var(--mono);font-size:15px;font-weight:600;color:var(--fg);line-height:1.5;margin:2px 0 6px}
+.scorecard .delta{display:block;font-size:12.5px;font-weight:600;margin-top:2px}
+.scorecard .pos{color:#2de2c5}
+.scorecard .neg{color:#ff3b4e}
 .balance-strip{display:flex;align-items:center;justify-content:space-between;font-family:var(--mono);font-size:11.5px;color:var(--faint)}
 
 /* order books */
@@ -156,6 +163,12 @@ body{padding-bottom:56px}
 
 /* utilities */
 .pos{color:var(--cyan)} .neg{color:var(--red)} .warn-c{color:var(--amber)}
+/* Unrealized (open position) — neutral grey, never red: it's a paper estimate,
+   not a realized loss. Keeps the ledger from screaming "all losses" mid-accumulation. */
+.unreal{color:var(--dim)}
+.unreal-tag{font-size:9px;color:var(--faint);letter-spacing:.03em;text-transform:uppercase;margin-left:3px}
+.ledger-note{font-family:var(--mono);font-size:10px;color:var(--faint);line-height:1.6;margin:2px 0 6px}
+.ledger-note b{color:var(--dim);font-weight:600}
 .flash{animation:flash-bg .7s ease}
 @keyframes flash-bg{0%{background:rgba(255,179,0,.18)}100%{background:transparent}}
 footer{font-family:var(--mono);font-size:10px;color:var(--faint);text-align:center;padding:12px 0 0}
@@ -263,7 +276,7 @@ footer{font-family:var(--mono);font-size:10px;color:var(--faint);text-align:cent
       <div class="ref-meta" id="best-sell-ref">—</div>
       <div class="bank-row">
         <input type="number" id="bank-balance-input" data-i18n-placeholder="bank_placeholder" placeholder="Банк, IDR">
-        <button id="bank-balance-save" data-i18n="save">Сохр.</button>
+        <button id="bank-balance-save" data-i18n="save">Начать сессию</button>
       </div>
       <div class="bank-check" id="bank-limit-check"></div>
       <div class="bank-check" id="suggested-limits"></div>
@@ -273,6 +286,7 @@ footer{font-family:var(--mono);font-size:10px;color:var(--faint);text-align:cent
   <!-- SESSION -->
   <div class="card">
     <span class="eyebrow" data-i18n="work_session">Рабочая сессия</span>
+    <div class="scorecard" id="scorecard"></div>
     <div class="session-line" id="session-line">—</div>
   </div>
 
@@ -310,6 +324,7 @@ footer{font-family:var(--mono);font-size:10px;color:var(--faint);text-align:cent
   <div class="card">
     <span class="eyebrow" data-i18n="ledger_title">Журнал сделок</span>
     <div class="ledger-summary" id="pnl-summary">—</div>
+    <div class="ledger-note" id="ledger-note"></div>
     <div class="ledger-scroll">
       <table>
         <thead><tr><th data-i18n="th_time">Время</th><th data-i18n="th_side">Сторона</th><th>USDT</th><th data-i18n="th_rate">Курс</th><th>IDR</th><th data-i18n="th_profit">Прибыль</th></tr></thead>
@@ -343,17 +358,20 @@ const I18N = {
     order_watch_below_be: "включено · рынок ниже безубытка, ждём",
     gauge_hourly: "$ / час", gauge_visibility: "Видимость", gauge_spread: "Спред",
     ref_sell: "Sell · продать", ref_buy: "Buy · купить",
-    bank_placeholder: "Банк, IDR", save: "Сохр.", balance: "Баланс",
+    bank_placeholder: "Банк, IDR", save: "Начать сессию", balance: "Баланс",
     book_buy_side: "Buy-сторона", book_buy_side_hint: "(где покупаешь ты)",
     book_sell_side: "Sell-сторона", book_sell_side_hint: "(где продаёшь ты)",
     th_price: "Цена", th_merchant: "Мерчант", th_time: "Время", th_side: "Сторона", th_rate: "Курс", th_profit: "Прибыль",
     chart_title: "График цены · 15 мин", chart_empty: "копим историю…",
     chart_buy_label: "покупают", chart_sell_label: "продают", chart_be_label: "безубыток",
     ledger_title: "Журнал сделок",
+    unrealized_tag: "не реализ.",
+    ledger_note: "<b>Прибыль:</b> цвет (зелёный/красный) = <b>реализовано</b> — сделка закрыта, комиссии учтены. Серое «~… не реализ.» на строках BUY = <b>ещё в позиции</b>, бумажная оценка до продажи, это не убыток.",
     live: "live", stale: "устарело {s}с — проверь Opera", backend_down: "backend недоступен",
     klaxon: "⚠ Рынок {dir} против тебя — действуй сейчас",
     order_alert_title: "💰 Заявку взяли — твоя очередь, 15 минут на перевод",
     order_alert_row: "{type} · {amount} · {price} · {counterparty}",
+    order_done: "✓ Выполнено",
     trend_stable: "рынок стабилен", trend_against: "рынок {dir} (~{speed} IDR/мин) — против тебя",
     trend_with: "рынок {dir} (~{speed} IDR/мин) — на твоей стороне",
     dir_up: "растёт", dir_down: "падает", dir_flat: "стабильно",
@@ -378,6 +396,9 @@ const I18N = {
     session_started: "Начата {time} · открыто Rp {opening}",
     session_earned: "Заработано: {pnl} ({cycles} циклов)",
     session_open: "В работе: {usdt} USDT по {price}",
+    scorecard: "Было Rp {was} → станет Rp {becomes}",
+    scorecard_delta: "{sign}Rp {delta} за круг (с учётом комиссий)",
+    scorecard_pending: "{sign}Rp {delta}: {usdt} USDT ещё не продано (оценка)",
   },
   en: {
     advice_now: "Advice now", loading: "Loading…", trend_loading: "gathering market history…",
@@ -398,17 +419,20 @@ const I18N = {
     order_watch_below_be: "on · market below breakeven, waiting",
     gauge_hourly: "$ / hour", gauge_visibility: "Visibility", gauge_spread: "Spread",
     ref_sell: "Sell · post ask", ref_buy: "Buy · post bid",
-    bank_placeholder: "Bank, IDR", save: "Save", balance: "Balance",
+    bank_placeholder: "Bank, IDR", save: "Start session", balance: "Balance",
     book_buy_side: "Buy side", book_buy_side_hint: "(where you buy)",
     book_sell_side: "Sell side", book_sell_side_hint: "(where you sell)",
     th_price: "Price", th_merchant: "Merchant", th_time: "Time", th_side: "Side", th_rate: "Rate", th_profit: "Profit",
     chart_title: "Price chart · 15 min", chart_empty: "gathering history…",
     chart_buy_label: "buyers", chart_sell_label: "sellers", chart_be_label: "breakeven",
     ledger_title: "Trade ledger",
+    unrealized_tag: "unrealized",
+    ledger_note: "<b>Profit:</b> colour (green/red) = <b>realized</b> — trade closed, fees counted. Grey \"~… unrealized\" on BUY rows = <b>still in position</b>, a paper estimate until sold, not a loss.",
     live: "live", stale: "stale {s}s — check Opera", backend_down: "backend unreachable",
     klaxon: "⚠ Market {dir} against you — act now",
     order_alert_title: "💰 Order taken — your turn, 15 minutes to transfer",
     order_alert_row: "{type} · {amount} · {price} · {counterparty}",
+    order_done: "✓ Done",
     trend_stable: "market is flat", trend_against: "market {dir} (~{speed} IDR/min) — against you",
     trend_with: "market {dir} (~{speed} IDR/min) — in your favor",
     dir_up: "rising", dir_down: "falling", dir_flat: "flat",
@@ -433,6 +457,9 @@ const I18N = {
     session_started: "Started {time} · opened with Rp {opening}",
     session_earned: "Earned: {pnl} ({cycles} cycles)",
     session_open: "In flight: {usdt} USDT at {price}",
+    scorecard: "Was Rp {was} → becomes Rp {becomes}",
+    scorecard_delta: "{sign}Rp {delta} this round (net of fees)",
+    scorecard_pending: "{sign}Rp {delta}: {usdt} USDT not yet sold (estimate)",
   },
 };
 let lang = localStorage.getItem("lang") || "ru";
@@ -725,15 +752,18 @@ async function refreshPnl(){
     if(s.open_sell_remainder_usdt>0) html+="<br>"+t("pnl_debt",{usdt:s.open_sell_remainder_usdt.toFixed(0)});
     else if(s.open_buy_surplus_usdt>0) html+="<br>"+t("pnl_surplus",{usdt:s.open_buy_surplus_usdt.toFixed(0)});
     document.getElementById("pnl-summary").innerHTML=html;
+    document.getElementById("ledger-note").innerHTML=t("ledger_note");
     document.querySelector("#pnl-table").innerHTML=d.cycles.slice().reverse().map(c=>{
-      let profitCell="—";
+      let profitCell=`<span class="unreal">—</span>`;
       if(c.side==="SELL"&&c.profit_idr!=null){
+        // Realized: FIFO-matched and fee-net — a real outcome, so colour it.
         const pcls=c.profit_idr>=0?"pos":"neg";
         profitCell=`<span class="${pcls}">Rp ${fmt(Math.round(c.profit_idr))}</span>`;
         if(c.unmatched_usdt>0) profitCell+=" ⚠";
       } else if(c.side==="BUY"&&c.unrealized_profit_idr!=null){
-        const pcls=c.unrealized_profit_idr>=0?"pos":"neg";
-        profitCell=`<span class="${pcls}">~Rp ${fmt(Math.round(c.unrealized_profit_idr))}</span>`;
+        // Unrealized: still-open lot marked to market. Never red — it is a paper
+        // estimate, not a loss. Neutral grey + explicit "не реализ." tag.
+        profitCell=`<span class="unreal">~Rp ${fmt(Math.round(c.unrealized_profit_idr))}<span class="unreal-tag">${t("unrealized_tag")}</span></span>`;
       }
       return `<tr><td>${fmtTime(c.time)}</td><td class="${c.side==='SELL'?'neg':'pos'}">${c.side}</td><td>${c.amount}</td><td>${fmt(c.unit_price)}</td><td>${fmt(c.total)}</td><td>${profitCell}</td></tr>`;
     }).join("");
@@ -794,6 +824,23 @@ async function refreshWorkSession(){
     const d=await r.json();
     const s=d.current;
     const startedTime=new Date(s.started_at*1000).toLocaleString(lang==="ru"?"ru-RU":"en-GB");
+    // Phase-1 scorecard: "Было X → станет Y". projected_balance_idr = opening +
+    // realized (fee-net) + fee-aware MTM of open USDT. The delta line notes when
+    // part of it is still an unsold estimate so the number isn't mistaken for final.
+    const pnl=s.session_pnl_idr||0;
+    const dcls=pnl>=0?"pos":"neg";
+    const sign=pnl>=0?"+":"−";
+    const becomes=`<span class="${dcls}">${fmt(Math.round(s.projected_balance_idr))}</span>`;
+    let deltaLine;
+    if(s.open_usdt>0){
+      deltaLine=t("scorecard_pending",{sign:sign,delta:fmt(Math.abs(Math.round(pnl))),usdt:s.open_usdt.toFixed(0)});
+    }else{
+      deltaLine=t("scorecard_delta",{sign:sign,delta:fmt(Math.abs(Math.round(pnl)))});
+    }
+    document.getElementById("scorecard").innerHTML=
+      t("scorecard",{was:fmt(Math.round(s.opening_balance_idr)),becomes:becomes})
+      +`<span class="delta ${dcls}">${deltaLine}</span>`;
+
     const cls=s.realized_pnl_idr>=0?"pos":"neg";
     const pnlSpan=`<span class="${cls}">Rp ${fmt(Math.round(s.realized_pnl_idr))}</span>`;
     let html=t("session_started",{time:startedTime,opening:fmt(Math.round(s.opening_balance_idr))});
@@ -811,13 +858,29 @@ async function refreshPendingOrders(){
     const r=await fetch("/api/pending-orders");
     const d=await r.json();
     lastPendingCount=d.pending_count||0;
-    if(d.new_orders&&d.new_orders.length){ openOrderAlerts=openOrderAlerts.concat(d.new_orders); playOrderAlertSound(); }
+    if(d.new_orders&&d.new_orders.length){
+      // Dedupe by order_number so a re-drain or overlap never doubles a row.
+      const seen=new Set(openOrderAlerts.map(o=>o.order_number));
+      for(const o of d.new_orders) if(!seen.has(o.order_number)) openOrderAlerts.push(o);
+      playOrderAlertSound();
+    }
     const el=document.getElementById("order-alert");
     if(openOrderAlerts.length===0){ el.classList.remove("show"); el.innerHTML=""; return; }
     el.classList.add("show");
+    // Per-order "Выполнено" — the user fills each P2P order by hand and marks it
+    // done individually; clearing one row must not dismiss the others.
     let html=`<div>${t("order_alert_title")} <span style="float:right;cursor:pointer;opacity:.7" id="order-alert-dismiss">✕</span></div>`;
-    for(const o of openOrderAlerts) html+=`<div class="oa-row">${t("order_alert_row",{type:o.type_date,amount:o.amount,price:o.price,counterparty:o.counterparty})}</div>`;
+    for(const o of openOrderAlerts){
+      const label=t("order_alert_row",{type:o.type_date,amount:o.amount,price:o.price,counterparty:o.counterparty});
+      html+=`<div class="oa-row"><span>${label}</span><button class="oa-done" data-order="${o.order_number}">${t("order_done")}</button></div>`;
+    }
     el.innerHTML=html;
+    el.querySelectorAll(".oa-done").forEach(btn=>btn.addEventListener("click",()=>{
+      const num=btn.getAttribute("data-order");
+      openOrderAlerts=openOrderAlerts.filter(o=>String(o.order_number)!==String(num));
+      refreshPendingOrders();  // re-render immediately; also pulls PnL/session on next tick
+      refreshPnl(); refreshEarnings(); refreshWorkSession();
+    }));
     document.getElementById("order-alert-dismiss").addEventListener("click",()=>{ openOrderAlerts=[]; el.classList.remove("show"); el.innerHTML=""; });
   }catch(e){}
 }

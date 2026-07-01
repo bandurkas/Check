@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+import os
 import subprocess
 import time
 
@@ -10,10 +11,23 @@ from fastapi.responses import HTMLResponse
 
 from ad_repricer import AdRepricer
 from advisor import TREND_AGAINST_IDR_PER_MIN, WIDE_SPREAD_PCT, ROUND_TRIP_FEE_PCT
-from advisor_llm import compute_advice_llm as compute_advice
+from advisor import compute_advice as _rule_compute_advice
+from advisor_llm import compute_advice_llm as _llm_compute_advice
 from market_watcher import MarketWatcher
 from order_watcher import OrderWatcher
 from pnl_tracker import PnLTracker
+
+# Phase 1 (proving profitability) runs on the deterministic, auditable rule-based
+# advisor — the engine verified against real trades 2026-07-01: every sell >= its
+# fee-aware floor profited, every sell < floor lost, no exceptions. The LLM advisor
+# is preserved for Phase 2 but OFF by default for two reasons proven this session:
+# (1) it is non-deterministic on a money-moving price, and (2) it uses a SYNCHRONOUS
+# anthropic client called from async handlers with no timeout — under rate-limiting
+# it blocks the single event loop, freezing market/pnl/order polling and leaving the
+# dashboard showing a stale price (the "18005 frozen while market moved" incident).
+# Flip USE_LLM_ADVISOR=1 only once the Phase-2 plan makes the LLM path async-safe.
+USE_LLM_ADVISOR = os.environ.get("USE_LLM_ADVISOR", "").lower() in ("1", "true", "yes")
+compute_advice = _llm_compute_advice if USE_LLM_ADVISOR else _rule_compute_advice
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -217,6 +231,28 @@ PNL_STALE_SECONDS = 300    # 5 min = 3 refresh cycles; stale avg_cost silently b
 MARKET_STALE_SECONDS = 30  # 7-8 poll cycles (4s each); frozen snapshot feeds bad prices to advisor
 
 
+def _data_staleness():
+    """Single source of truth for 'is our data too old to trade on'. Used by
+    auto-reprice (which BLOCKS on stale) AND the displayed advice/agent (which
+    must WARN, not render a confident price computed from frozen inputs). Before
+    this, only auto-reprice was gated: the dashboard advice kept showing a price
+    off a stale avg_cost, letting a below-breakeven sell through for -13237 IDR
+    on 2026-07-01. Same thresholds everywhere => no divergence between what the
+    bot will act on and what the human is told."""
+    now = time.time()
+    pnl_age = now - pnl_cache.get("updated_at", 0)
+    market_age = now - watcher.latest.timestamp
+    pnl_stale = pnl_cache["summary"] is None or pnl_age >= PNL_STALE_SECONDS
+    market_stale = market_age >= MARKET_STALE_SECONDS
+    return {
+        "stale": pnl_stale or market_stale,
+        "pnl_stale": pnl_stale,
+        "market_stale": market_stale,
+        "pnl_age_sec": round(pnl_age),
+        "market_age_sec": round(market_age),
+    }
+
+
 async def auto_reprice_loop():
     """Off by default (repricer.enabled). When on, mirrors exactly what the
     advisor card already tells the user to do by hand - only fires on the
@@ -239,15 +275,13 @@ async def auto_reprice_loop():
       repricing that slips past a temporarily-correct floor."""
     while True:
         try:
-            now = time.time()
-            pnl_age = now - pnl_cache.get("updated_at", 0)
-            market_age = now - watcher.latest.timestamp
-            pnl_ready = pnl_cache["summary"] is not None and pnl_age < PNL_STALE_SECONDS
-            market_ready = market_age < MARKET_STALE_SECONDS
+            st = _data_staleness()
+            pnl_ready = not st["pnl_stale"]
+            market_ready = not st["market_stale"]
             if not pnl_ready and repricer.enabled:
-                print(f"[auto_reprice] skipping: pnl_cache is {pnl_age:.0f}s stale (limit {PNL_STALE_SECONDS}s)")
+                print(f"[auto_reprice] skipping: pnl_cache is {st['pnl_age_sec']}s stale (limit {PNL_STALE_SECONDS}s)")
             if not market_ready and repricer.enabled:
-                print(f"[auto_reprice] skipping: market data is {market_age:.0f}s stale (limit {MARKET_STALE_SECONDS}s)")
+                print(f"[auto_reprice] skipping: market data is {st['market_age_sec']}s stale (limit {MARKET_STALE_SECONDS}s)")
             if repricer.enabled and order_watch_state["enabled"] and pnl_ready and market_ready and not order_watcher.has_pending():
                 inputs = _advice_inputs()
                 result = compute_advice(lang="ru", **inputs)
@@ -260,10 +294,29 @@ async def auto_reprice_loop():
                     and rec_price is not None
                     and abs(rec_price - my_ad["price"]) >= 1
                 ):
-                    ok, msg = await repricer.reprice(
-                        my_ad["adv_no"], my_ad["price"], rec_price, is_pending_fn=order_watcher.has_pending,
-                    )
-                    print(f"[auto_reprice] state={result['state']} ok={ok}: {msg}")
+                    # Independent breakeven guard (last line before a live order).
+                    # The advisor's floor should already clamp any below-cost SELL
+                    # to state=floor (excluded from AUTO_REPRICE_STATES), but if
+                    # that floor was bypassed — stale cost, or the position isn't
+                    # FIFO-tracked so max_cost is None — never let auto-reprice
+                    # push a SELL below its own fee-aware breakeven. On the SELL
+                    # side, an unknown cost (None) is treated as unsafe: refuse.
+                    block = False
+                    if inputs["active_side"] == "SELL":
+                        max_cost = inputs.get("own_max_cost_idr")
+                        if max_cost is None:
+                            block = True
+                            print("[auto_reprice] BLOCKED: SELL with no tracked cost basis — refusing")
+                        else:
+                            breakeven = max_cost * (1 + ROUND_TRIP_FEE_PCT / 100)
+                            if rec_price < breakeven:
+                                block = True
+                                print(f"[auto_reprice] BLOCKED: SELL rec {rec_price:.0f} < breakeven {breakeven:.0f} — floor bypassed")
+                    if not block:
+                        ok, msg = await repricer.reprice(
+                            my_ad["adv_no"], my_ad["price"], rec_price, is_pending_fn=order_watcher.has_pending,
+                        )
+                        print(f"[auto_reprice] state={result['state']} ok={ok}: {msg}")
         except Exception as e:
             print(f"[auto_reprice] loop error: {e}")
         await asyncio.sleep(AUTO_REPRICE_INTERVAL_SECONDS)
@@ -316,7 +369,14 @@ async def pnl():
         row = dict(c)
         open_usdt = row.get("open_usdt") or 0.0
         if open_usdt > 1e-9 and current_price is not None:
-            row["unrealized_profit_idr"] = round(open_usdt * (current_price - row["unit_price"]), 2)
+            # Fee-aware MTM: what this lot would net if sold NOW. The buy leg's
+            # fee is already sunk in unit_price's cost; the sell leg's fee plus
+            # the buy leg's are folded into the *1.002 breakeven so this number
+            # is consistent with the advisor floor (cost * (1+ROUND_TRIP_FEE_PCT)).
+            # Fee-blind (current - unit_price) showed ~-12/unit when the real
+            # gap-to-exit was ~-48/unit and lied about profitability.
+            breakeven = row["unit_price"] * (1 + ROUND_TRIP_FEE_PCT / 100)
+            row["unrealized_profit_idr"] = round(open_usdt * (current_price - breakeven), 2)
         else:
             row["unrealized_profit_idr"] = None
         enriched.append(row)
@@ -340,21 +400,19 @@ async def set_active_side(request: Request):
 
 @app.get("/api/auto-reprice")
 async def get_auto_reprice():
-    now = time.time()
-    pnl_age = now - pnl_cache.get("updated_at", 0)
-    market_age = now - watcher.latest.timestamp
+    st = _data_staleness()
     return {
         "enabled": repricer.enabled,
         "max_delta_idr": repricer.max_delta_idr,
         "cooldown_sec": repricer.cooldown_sec,
         "last_result": repricer.last_result,
         "order_watch_enabled": order_watch_state["enabled"],
-        "pnl_ready": pnl_cache["summary"] is not None and pnl_age < PNL_STALE_SECONDS,
-        "pnl_age_sec": round(pnl_age),
-        "pnl_stale": pnl_age >= PNL_STALE_SECONDS,
-        "market_ready": market_age < MARKET_STALE_SECONDS,
-        "market_age_sec": round(market_age),
-        "market_stale": market_age >= MARKET_STALE_SECONDS,
+        "pnl_ready": not st["pnl_stale"],
+        "pnl_age_sec": st["pnl_age_sec"],
+        "pnl_stale": st["pnl_stale"],
+        "market_ready": not st["market_stale"],
+        "market_age_sec": st["market_age_sec"],
+        "market_stale": st["market_stale"],
         "has_pending_order": order_watcher.has_pending(),
         "market_above_breakeven": _market_above_breakeven(),
     }
@@ -432,7 +490,27 @@ async def get_work_sessions():
         else:
             stats = {k: s.get(k) for k in ("matched_cycles", "realized_pnl_idr", "open_usdt", "open_avg_cost_idr", "closed_at")}
         sessions.append({"started_at": s["started_at"], "opening_balance_idr": s["opening_balance_idr"], **stats})
-    return {"sessions": sessions, "current": sessions[-1]}
+
+    # Phase-1 scorecard on the live session: "было X IDR → станет Y IDR".
+    # Projected closing bank balance = opening + realized (already fee-net via
+    # _fifo_match) + fee-aware MTM of whatever USDT is still open (net of the
+    # round-trip fee, same convention as /api/pnl and /api/earnings). This is
+    # the single number that proves/disproves profitability of a full round trip.
+    current = sessions[-1]
+    current_price = watcher.latest.robust_sell_price
+    open_usdt = current.get("open_usdt") or 0.0
+    open_avg = current.get("open_avg_cost_idr")
+    unrealized = None
+    if open_usdt > 1e-9 and open_avg is not None and current_price is not None:
+        breakeven = open_avg * (1 + ROUND_TRIP_FEE_PCT / 100)
+        unrealized = open_usdt * (current_price - breakeven)
+    realized = current.get("realized_pnl_idr") or 0.0
+    session_pnl = realized + (unrealized or 0.0)
+    current["unrealized_net_idr"] = round(unrealized, 2) if unrealized is not None else None
+    current["session_pnl_idr"] = round(session_pnl, 2)
+    current["projected_balance_idr"] = round(current["opening_balance_idr"] + session_pnl, 2)
+    current["current_sell_price_idr"] = current_price
+    return {"sessions": sessions, "current": current}
 
 
 @app.get("/api/earnings")
@@ -452,7 +530,10 @@ async def earnings():
     open_avg_cost = summary.get("session_open_avg_cost_idr")
     unrealized_idr = None
     if open_usdt > 0 and open_avg_cost is not None and current_price is not None:
-        unrealized_idr = open_usdt * (current_price - open_avg_cost)
+        # Fee-aware MTM (see /api/pnl): net-of-round-trip-fee, so total_potential
+        # and the session scorecard don't overstate what a close would realize.
+        breakeven = open_avg_cost * (1 + ROUND_TRIP_FEE_PCT / 100)
+        unrealized_idr = open_usdt * (current_price - breakeven)
 
     session_start_ms = summary.get("session_start_ms")
     hours_elapsed = (time.time() * 1000 - session_start_ms) / 3_600_000 if session_start_ms else None
@@ -598,6 +679,33 @@ async def advice(lang: str = "ru"):
     else:
         result["market_against"] = market_trend > TREND_AGAINST_IDR_PER_MIN
         result["market_direction"] = "up" if market_trend > 0 else ("down" if market_trend < 0 else "flat")
+
+    # Staleness gate: a price computed from a frozen orderbook or a stale
+    # cost-basis (floor silently bypassed) must never be shown as actionable.
+    # Same threshold auto-reprice blocks on, so bot and human agree.
+    st = _data_staleness()
+    result["data_stale"] = st["stale"]
+    result["pnl_stale"] = st["pnl_stale"]
+    result["market_stale"] = st["market_stale"]
+    if st["stale"]:
+        parts = []
+        if st["pnl_stale"]:
+            parts.append((f"P&L {st['pnl_age_sec']}с", f"P&L {st['pnl_age_sec']}s"))
+        if st["market_stale"]:
+            parts.append((f"рынок {st['market_age_sec']}с", f"market {st['market_age_sec']}s"))
+        detail_ru = ", ".join(p[0] for p in parts)
+        detail_en = ", ".join(p[1] for p in parts)
+        stale_msgs = {
+            "ru": (f"⚠️ Данные устарели ({detail_ru}) — не торгуй по этой цене, floor не гарантирован",
+                   "Пока данные не обновятся, рекомендация ненадёжна — проверь Opera/связь с VPS"),
+            "en": (f"⚠️ Data is stale ({detail_en}) — do not trade on this price, floor not guaranteed",
+                   "Recommendation unreliable until data refreshes — check Opera / VPS link"),
+        }
+        adv, reason = stale_msgs.get(lang, stale_msgs["ru"])
+        result["state"] = "stale"
+        result["recommended_price"] = None
+        result["advice"] = adv
+        result["reasons"] = [reason]
     return result
 
 
@@ -687,6 +795,25 @@ def _build_instruction(advice: dict, inputs: dict, pending_orders: list) -> dict
                 f"Убедись что Binance P2P показывает сделку завершённой",
                 f"Нажми «Выполнено» — система переключится на {next_side}",
             ],
+            "price": None,
+        }
+
+    # 2.5 Stale data — never emit a price action computed from frozen inputs.
+    # Comes after pending-order/trade-done (those don't depend on market price)
+    # but before any price logic. Mirrors the /api/advice staleness gate.
+    st = _data_staleness()
+    if st["stale"]:
+        parts = []
+        if st["pnl_stale"]:
+            parts.append(f"P&L {st['pnl_age_sec']}с")
+        if st["market_stale"]:
+            parts.append(f"рынок {st['market_age_sec']}с")
+        return {
+            "action": "wait",
+            "urgency": "medium",
+            "title": "⚠️ Данные устарели — не выставляй цену",
+            "context": f"Устарели: {', '.join(parts)}. Совет по цене ненадёжен, floor не гарантирован. Проверь Opera и связь с VPS.",
+            "steps": [],
             "price": None,
         }
 
