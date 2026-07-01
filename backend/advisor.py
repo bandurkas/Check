@@ -108,22 +108,23 @@ def compute_advice(*, active_side, my_ad, my_ad_age_min, spread_pct,
                     debt_amount, debt_age_min, minutes_since_fill,
                     baseline_price, aggressive_price,
                     market_speed_idr_per_min=None, market_trend_idr_per_min=None,
-                    own_avg_cost_idr=None, own_open_usdt=None,
+                    own_avg_cost_idr=None, own_max_cost_idr=None, own_open_usdt=None,
                     lang="ru"):
     """Wraps _compute_advice_raw with a fee-aware cost-basis floor on the SELL
     side: whatever state/price the raw rules land on, never recommend selling
-    below break-even on currently-held inventory - own avg buy cost PLUS
-    ROUND_TRIP_FEE_PCT, since Binance's ~0.1%-per-leg commission (own_avg_cost_idr,
-    own_open_usdt - both from PnLTracker's open FIFO lots) is real money that
-    a raw price comparison misses entirely. Selling at exactly your buy price
-    nets a real loss once both legs' commission is counted - confirmed
-    2026-06-30: a whole session of FIFO-"profitable" trades (Rp 171,278 on
-    paper) was actually a Rp 118,391 net loss after fees. own_open_usdt below
-    ~1 is treated as "nothing real to protect" so a stale historical average
-    can't clamp a position that's effectively empty.
+    below break-even on currently-held inventory.
 
-    See _compute_advice_raw for the rest of the parameters and the underlying
-    push/trend/debt/tight/wide/neutral decision tree this wraps."""
+    Floor is based on the MOST EXPENSIVE open lot (own_max_cost_idr), not the
+    weighted average (own_avg_cost_idr). The weighted average only protects the
+    portfolio as a whole when all lots are sold simultaneously; under FIFO each
+    lot is matched independently and a cheap lot can mask a loss on an expensive
+    one. Using max_cost ensures the most expensive lot (the hardest to recover)
+    is always fully covered - confirmed necessary 2026-07-01: weighted avg floor
+    of 17,993 allowed selling the 17,969 lot at 17,993 which nets -12 IDR/USDT
+    after fees (individual breakeven of that lot was 18,005, not 17,993).
+
+    own_open_usdt below ~1 is treated as "nothing real to protect" so a stale
+    historical average can't clamp a position that's effectively empty."""
     S = STRINGS.get(lang, STRINGS["ru"])
     result = _compute_advice_raw(
         active_side=active_side, my_ad=my_ad, my_ad_age_min=my_ad_age_min, spread_pct=spread_pct,
@@ -133,13 +134,15 @@ def compute_advice(*, active_side, my_ad, my_ad_age_min, spread_pct,
         lang=lang,
     )
     has_position = own_open_usdt is not None and own_open_usdt > 1
-    if active_side == "SELL" and has_position and own_avg_cost_idr is not None:
-        breakeven_price = own_avg_cost_idr * (1 + ROUND_TRIP_FEE_PCT / 100)
+    # Prefer max lot cost; fall back to avg only if max not available (old cache without the field).
+    cost_for_floor = own_max_cost_idr if own_max_cost_idr is not None else own_avg_cost_idr
+    if active_side == "SELL" and has_position and cost_for_floor is not None:
+        breakeven_price = cost_for_floor * (1 + ROUND_TRIP_FEE_PCT / 100)
         if result["recommended_price"] is not None and result["recommended_price"] < breakeven_price:
             result["state"] = "floor"
             result["recommended_price"] = breakeven_price
             result["advice"] = S["advice_floor"].format(price=breakeven_price)
-            result["reasons"] = [S["reason_floor"].format(cost=own_avg_cost_idr)]
+            result["reasons"] = [S["reason_floor"].format(cost=cost_for_floor)]
     return result
 
 

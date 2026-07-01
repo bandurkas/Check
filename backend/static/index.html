@@ -5,191 +5,169 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>⌁ TERMINAL — USDT/IDR</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg-void:#08090b; --bg-panel:#0e1114; --bg-raised:#161b1f;
-  --line:#22282d; --line-bright:#3a444c;
-  --ink:#e9edf0;
-  --ink-dim:#8b949c; --ink-faint:#4a525a;
-  --amber:#ffb300; --amber-soft:#ffd166;
-  --cyan:#2de2c5; --red:#ff3b4e;
-  --pos:#2de2c5; --neg:#ff3b4e; --warn:#ffb300;
-  --mono:'IBM Plex Mono',ui-monospace,monospace;
+  --bg:#090c0f;
+  --card:#0f1318;
+  --raised:#161c22;
+  --line:#1e2530;
+  --line-faint:#13181e;
+  --text:#dde3ea;
+  --dim:#7a8695;
+  --faint:#3f4b58;
+  --cyan:#2de2c5;
+  --amber:#ffb300;
+  --red:#ff3b4e;
+  --mono:'IBM Plex Mono',monospace;
   --sans:'IBM Plex Sans',system-ui,sans-serif;
   --disp:'Rajdhani',var(--sans);
 }
-*{box-sizing:border-box}
-html,body{margin:0;padding:0}
-body{
-  background:
-    radial-gradient(1200px 600px at 50% -10%, #131720 0%, var(--bg-void) 55%),
-    var(--bg-void);
-  color:var(--ink);
-  font-family:var(--sans);
-  -webkit-font-smoothing:antialiased;
-  min-height:100vh;
-  padding:0 0 48px;
-}
-.noise{
-  position:fixed; inset:0; pointer-events:none; z-index:1; opacity:.035; mix-blend-mode:overlay;
-  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-}
-.scan{
-  position:fixed; inset:0; pointer-events:none; z-index:2; opacity:.05;
-  background:repeating-linear-gradient(0deg, #000 0px, #000 1px, transparent 1px, transparent 3px);
-}
-.wrap{ max-width:480px; margin:0 auto; padding:14px 14px 0; position:relative; z-index:3; }
-@media(min-width:860px){ .wrap{ max-width:840px; } }
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;-webkit-font-smoothing:antialiased}
+body{padding-bottom:56px}
+.wrap{max-width:480px;margin:0 auto;padding:12px}
+@media(min-width:860px){.wrap{max-width:840px}}
 
-/* ---------- top bar ---------- */
-.topbar{ display:flex; align-items:center; justify-content:space-between; padding:6px 2px 16px; gap:10px; }
-.brand{ font-family:var(--disp); font-weight:700; letter-spacing:.12em; font-size:15px; text-transform:uppercase; color:var(--ink); }
-.brand small{ display:block; font-family:var(--mono); font-weight:400; letter-spacing:.06em; font-size:10px; color:var(--ink-faint); text-transform:none; margin-top:2px; }
-.topbar-right{ display:flex; align-items:center; gap:10px; }
-.live{ display:flex; align-items:center; gap:7px; font-family:var(--mono); font-size:11px; color:var(--ink-dim); white-space:nowrap; }
-.live .dot{ width:7px; height:7px; border-radius:50%; background:var(--cyan); box-shadow:0 0 8px var(--cyan); animation:breathe 2.2s ease-in-out infinite; flex:none; }
-.live.stale .dot{ background:var(--red); box-shadow:0 0 8px var(--red); animation:blink .6s steps(1) infinite; }
-@keyframes breathe{ 0%,100%{opacity:1} 50%{opacity:.35} }
-@keyframes blink{ 0%,49%{opacity:1} 50%,100%{opacity:.2} }
-.lang-toggle{ display:flex; border:1px solid var(--line-bright); border-radius:2px; overflow:hidden; font-family:var(--mono); font-size:10.5px; }
-.lang-toggle button{ background:var(--bg-panel); color:var(--ink-faint); border:none; padding:4px 8px; cursor:pointer; font-family:inherit; font-size:inherit; letter-spacing:.04em; }
-.lang-toggle button.active{ background:var(--amber); color:#1a1305; font-weight:600; }
-.side-override-btn{ background:var(--bg-panel); color:var(--ink-faint); border:1px solid var(--line-bright); border-radius:2px; padding:2px 8px; cursor:pointer; font-family:var(--mono); font-size:11px; letter-spacing:.04em; }
-.side-override-btn.active{ background:var(--amber); color:#1a1305; font-weight:600; border-color:var(--amber); }
+/* card shell */
+.card{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:14px 16px;margin-bottom:10px}
+.eyebrow{font-family:var(--disp);font-weight:600;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--faint);display:block;margin-bottom:8px}
 
-/* ---------- global klaxon ---------- */
-.klaxon{ display:none; }
-.klaxon.show{
-  display:flex; align-items:center; gap:10px; justify-content:center;
-  margin:0 0 14px; padding:11px 14px; border:1px solid var(--red);
-  background:linear-gradient(180deg, rgba(255,59,78,.16), rgba(255,59,78,.05));
-  color:#ffd9dd; font-family:var(--disp); font-weight:700; letter-spacing:.06em;
-  text-transform:uppercase; font-size:13.5px; border-radius:3px;
-  animation:klaxon-pulse 1.1s ease-in-out infinite;
-}
-@keyframes klaxon-pulse{ 0%,100%{box-shadow:0 0 0px rgba(255,59,78,0)} 50%{box-shadow:0 0 22px rgba(255,59,78,.55)} }
+/* topbar */
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 2px 14px}
+.brand{font-family:var(--disp);font-weight:700;font-size:16px;letter-spacing:.12em;text-transform:uppercase}
+.brand small{display:block;font-family:var(--mono);font-size:10px;color:var(--faint);font-weight:400;letter-spacing:.04em;margin-top:2px}
+.topbar-right{display:flex;align-items:center;gap:10px}
+#live{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--dim)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan);flex-shrink:0;animation:breathe 2.2s ease-in-out infinite}
+#live.stale .dot{background:var(--red);box-shadow:0 0 8px var(--red);animation:blink .6s steps(1) infinite}
+@keyframes breathe{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:.2}}
+.lang-toggle{display:flex;border:1px solid var(--line);border-radius:3px;overflow:hidden}
+.lang-toggle button{background:var(--card);color:var(--faint);border:none;padding:4px 9px;cursor:pointer;font-family:var(--mono);font-size:10px;letter-spacing:.06em}
+.lang-toggle button.active{background:var(--amber);color:#1a1200;font-weight:700}
 
-/* ---------- order-taken alert (15-min payment window) ---------- */
-.order-alert{ display:none; }
-.order-alert.show{
-  display:flex; flex-direction:column; gap:4px;
-  margin:0 0 14px; padding:12px 14px; border:1px solid var(--amber);
-  background:linear-gradient(180deg, rgba(255,179,0,.18), rgba(255,179,0,.06));
-  color:#ffe9b3; font-family:var(--disp); font-weight:700; letter-spacing:.04em;
-  font-size:14px; border-radius:3px;
-  animation:klaxon-pulse 1.1s ease-in-out infinite;
-}
-.order-alert .oa-row{ font-weight:400; font-size:12.5px; opacity:.85; text-transform:none; letter-spacing:normal; }
+/* alerts */
+.klaxon{display:none}
+.klaxon.show{display:flex;align-items:center;justify-content:center;margin-bottom:10px;padding:10px 14px;border:1px solid var(--red);background:rgba(255,59,78,.10);color:#ffd5d8;font-family:var(--disp);font-weight:700;font-size:14px;letter-spacing:.06em;text-transform:uppercase;border-radius:4px;animation:pulse-red 1.2s ease-in-out infinite}
+.order-alert{display:none}
+.order-alert.show{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;padding:12px 14px;border:1px solid var(--amber);background:rgba(255,179,0,.10);color:#ffe8a8;font-family:var(--disp);font-weight:700;font-size:14px;border-radius:4px;animation:pulse-amber 1.2s ease-in-out infinite}
+.oa-row{font-weight:400;font-size:12px;opacity:.85}
+@keyframes pulse-red{0%,100%{box-shadow:0 0 0 rgba(255,59,78,0)}50%{box-shadow:0 0 20px rgba(255,59,78,.4)}}
+@keyframes pulse-amber{0%,100%{box-shadow:0 0 0 rgba(255,179,0,0)}50%{box-shadow:0 0 20px rgba(255,179,0,.35)}}
 
-/* ---------- panel shell w/ corner brackets ---------- */
-.panel{ position:relative; background:var(--bg-panel); border:1px solid var(--line); border-radius:2px; padding:16px; }
-.panel::before,.panel::after{ content:''; position:absolute; width:11px; height:11px; opacity:.9; }
-.panel::before{ top:-1px; left:-1px; border-top:2px solid var(--bracket,var(--ink-faint)); border-left:2px solid var(--bracket,var(--ink-faint)); }
-.panel::after{ bottom:-1px; right:-1px; border-bottom:2px solid var(--bracket,var(--ink-faint)); border-right:2px solid var(--bracket,var(--ink-faint)); }
-.eyebrow{ font-family:var(--disp); font-weight:600; letter-spacing:.16em; text-transform:uppercase; font-size:11px; color:var(--ink-faint); }
+/* advice card */
+#advice-panel{border-color:var(--line);transition:border-color .3s}
+#advice-panel.state-push{border-color:rgba(255,179,0,.45)}
+#advice-panel.state-trend,#advice-panel.state-urgent{border-color:rgba(255,59,78,.6);animation:pulse-red 1.3s ease-in-out infinite}
+#advice-panel.state-wide,#advice-panel.state-floor{border-color:rgba(45,226,197,.4)}
+.advice-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.side-badge{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.1em;padding:2px 8px;border-radius:2px;background:var(--raised);color:var(--dim)}
+.side-badge.SELL{background:rgba(255,59,78,.15);color:#ff8899}
+.side-badge.BUY{background:rgba(45,226,197,.12);color:var(--cyan)}
+.advice-text{font-family:var(--disp);font-weight:700;font-size:19px;line-height:1.25;color:var(--text);margin-bottom:4px}
+.advice-price-wrap{display:none;font-family:var(--mono);font-size:28px;font-weight:700;color:var(--amber);letter-spacing:-.02em;margin:6px 0}
+.advice-price-wrap .cur{font-size:14px;color:var(--faint);margin-right:3px;font-weight:400}
+.advice-reasons{list-style:none;padding:0;margin:6px 0}
+.advice-reasons li{font-family:var(--mono);font-size:11.5px;color:var(--dim);padding:3px 0 3px 14px;position:relative;border-bottom:1px solid var(--line-faint)}
+.advice-reasons li:last-child{border-bottom:none}
+.advice-reasons li::before{content:"·";position:absolute;left:0;color:var(--faint)}
+.trend-strip{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--faint);padding:5px 0;margin-top:4px}
+.trend-strip.against{color:var(--red)}
+.trend-strip.with{color:var(--cyan)}
+.trend-strip .arrow{font-size:14px}
+.side-row{display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:var(--dim)}
+.side-btn{background:var(--raised);color:var(--faint);border:1px solid var(--line);border-radius:2px;padding:2px 9px;font-family:var(--mono);font-size:10px;letter-spacing:.04em;cursor:pointer}
+.side-btn.active{background:var(--amber);color:#1a1200;font-weight:700;border-color:var(--amber)}
+.auto-row{margin-top:10px;padding-top:10px;border-top:1px solid var(--line-faint)}
+.auto-row-label{font-family:var(--disp);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--faint);margin-bottom:6px;display:block}
+.auto-toggle{display:flex;align-items:center;gap:8px;margin-bottom:2px;font-size:12.5px;color:var(--dim);cursor:pointer}
+.auto-toggle input{cursor:pointer;accent-color:var(--cyan)}
+.auto-status{font-family:var(--mono);font-size:11px;color:var(--faint);margin:2px 0 6px 20px;min-height:14px}
 
-/* ---------- reveal on load ---------- */
-.reveal{ opacity:0; transform:translateY(10px); animation:rise .5s cubic-bezier(.2,.8,.2,1) forwards; }
-@keyframes rise{ to{opacity:1; transform:none} }
+/* ── agent card ── */
+#agent-card{border-color:rgba(255,179,0,.25)}
+#agent-card.urgency-high{border-color:var(--red);box-shadow:0 0 18px rgba(255,59,78,.12) inset}
+#agent-card.urgency-low{border-color:var(--line)}
+.agent-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.agent-eyebrow{font-family:var(--disp);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--faint)}
+.agent-urgency{font-family:var(--mono);font-size:11px;color:var(--faint)}
+#agent-title{font-family:var(--disp);font-weight:700;font-size:20px;line-height:1.2;color:var(--text);margin-bottom:6px}
+#agent-context{font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.55;margin-bottom:10px}
+#agent-steps{list-style:none;padding:0;margin:0 0 12px;counter-reset:step}
+#agent-steps li{font-family:var(--mono);font-size:12px;color:var(--text);padding:5px 0 5px 22px;position:relative;border-bottom:1px solid var(--line-faint);counter-increment:step}
+#agent-steps li:last-child{border-bottom:none}
+#agent-steps li::before{content:counter(step);position:absolute;left:0;font-size:9px;color:var(--faint);font-weight:700;top:7px}
+.agent-btns{display:flex;gap:8px;margin-bottom:4px}
+.btn-done{background:rgba(45,226,197,.12);border:1px solid rgba(45,226,197,.4);color:var(--cyan);font-family:var(--mono);font-size:12px;font-weight:700;padding:8px 20px;border-radius:3px;cursor:pointer;letter-spacing:.04em;transition:background .15s}
+.btn-done:hover{background:rgba(45,226,197,.22)}
+.btn-done:disabled{opacity:.35;cursor:default}
+.btn-skip{background:transparent;border:1px solid var(--line);color:var(--faint);font-family:var(--mono);font-size:11px;padding:8px 14px;border-radius:3px;cursor:pointer}
+.btn-skip:hover{color:var(--dim)}
+.agent-hist-wrap{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line)}
+.agent-hist-label{font-family:var(--disp);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--faint);margin-bottom:4px}
+.agent-hist-list{display:flex;flex-direction:column;gap:3px}
+.agent-hist-row{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+.agent-hist-row .h-time{color:var(--faint);flex-shrink:0}
+.agent-hist-row.skipped{opacity:.45}
 
-/* ---------- advice panel ---------- */
-.advice{ margin-bottom:12px; --bracket:var(--ink-faint); transition:border-color .3s; }
-.advice.state-wide,.advice.state-floor{ --bracket:var(--cyan); border-color:rgba(45,226,197,.35); }
-.advice.state-push{ --bracket:var(--amber); border-color:rgba(255,179,0,.35); }
-.advice.state-debt,.advice.state-tight,.advice.state-trend{ --bracket:var(--red); border-color:rgba(255,59,78,.4); }
-.advice.state-urgent{ --bracket:var(--red); border-color:var(--red); animation:urgent-glow 1.3s ease-in-out infinite; }
-@keyframes urgent-glow{ 0%,100%{box-shadow:0 0 0 rgba(255,59,78,0)} 50%{box-shadow:0 0 28px rgba(255,59,78,.4) inset, 0 0 18px rgba(255,59,78,.25)} }
-.advice-top{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
-.side-badge{ font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.08em; padding:3px 9px; border-radius:2px; border:1px solid var(--line-bright); color:var(--ink-dim); }
-.side-badge.SELL{ color:#ffb8c0; border-color:rgba(255,59,78,.4); background:rgba(255,59,78,.08); }
-.side-badge.BUY{ color:#a9e9dc; border-color:rgba(45,226,197,.4); background:rgba(45,226,197,.08); }
-.advice-text{ font-family:var(--disp); font-weight:700; font-size:25px; line-height:1.15; letter-spacing:.01em; margin:4px 0 10px; }
-.advice-price{ font-family:var(--mono); font-size:34px; font-weight:600; color:var(--ink); letter-spacing:-.01em; }
-.advice-price .cur{ font-size:16px; color:var(--ink-faint); margin-right:4px; }
-.advice-reasons{ list-style:none; margin:12px 0 0; padding:10px 0 0; border-top:1px dashed var(--line); font-family:var(--mono); font-size:12px; color:var(--ink-dim); line-height:1.7; }
-.advice-reasons li{ padding-left:14px; position:relative; }
-.advice-reasons li::before{ content:'›'; position:absolute; left:0; color:var(--ink-faint); }
-.trend-strip{ margin-top:12px; padding:9px 11px; border-radius:2px; font-family:var(--mono); font-size:12.5px; display:flex; align-items:center; gap:8px; border:1px solid var(--line); }
-.trend-strip .arrow{ font-size:15px; }
-.trend-strip.against{ border-color:rgba(255,59,78,.5); background:rgba(255,59,78,.1); color:#ffc2c8; font-weight:600; }
-.trend-strip.with{ border-color:rgba(45,226,197,.35); background:rgba(45,226,197,.06); color:#bdf2e8; }
-.trend-strip.flat{ color:var(--ink-faint); }
+/* gauges */
+.gauges{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
+.gauge .val{font-family:var(--mono);font-size:20px;font-weight:700;margin:6px 0 2px}
+.gauge .sub{font-family:var(--mono);font-size:10px;color:var(--faint)}
 
-/* ---------- automation row (auto-reprice + order-watch, grouped since
-   they gate each other - see auto_reprice_loop in main.py) ---------- */
-.auto-row{ margin-top:12px; padding-top:10px; border-top:1px dashed var(--line); display:grid; grid-template-columns:auto 1fr; column-gap:10px; row-gap:5px; align-items:center; }
-.auto-row-eyebrow{ grid-column:1/-1; font-family:var(--disp); font-weight:600; letter-spacing:.14em; text-transform:uppercase; font-size:10px; color:var(--ink-faint); margin-bottom:2px; }
-.auto-toggle{ display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; white-space:nowrap; }
-.auto-toggle-status{ font-family:var(--mono); font-size:11px; color:var(--ink-dim); }
+/* refs */
+.refs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.ref-px{font-family:var(--mono);font-size:22px;font-weight:700;margin:4px 0 2px}
+.ref-meta{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+.ref.SELL .ref-px{color:#ff8899}
+.ref.BUY .ref-px{color:var(--cyan)}
+.bank-row{display:flex;gap:6px;margin-top:8px}
+.bank-row input{flex:1;background:var(--raised);border:1px solid var(--line);border-radius:3px;padding:5px 8px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none}
+.bank-row input:focus{border-color:var(--amber)}
+.bank-row button{background:rgba(255,179,0,.15);border:1px solid rgba(255,179,0,.4);color:var(--amber);font-family:var(--mono);font-size:11px;font-weight:700;padding:5px 12px;border-radius:3px;cursor:pointer}
+.bank-check{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:4px}
 
-/* ---------- gauge row ---------- */
-.gauges{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
-.gauge{ padding:12px 10px; }
-.gauge .val{ font-family:var(--mono); font-size:19px; font-weight:600; margin-top:6px; letter-spacing:-.01em; }
-.gauge .sub{ font-family:var(--mono); font-size:10.5px; color:var(--ink-faint); margin-top:3px; }
-.flash{ animation:flash-bg .7s ease; }
-@keyframes flash-bg{ 0%{ background:rgba(255,179,0,.18); } 100%{ background:transparent; } }
-.pos{ color:var(--pos); } .neg{ color:var(--neg); } .warn-c{ color:var(--warn); }
+/* session / balance */
+.session-line{font-family:var(--mono);font-size:11.5px;color:var(--dim);line-height:1.7;margin-top:4px}
+.balance-strip{display:flex;align-items:center;justify-content:space-between;font-family:var(--mono);font-size:11.5px;color:var(--faint)}
 
-/* ---------- reference row ---------- */
-.refs{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
-.ref h3{ margin:0 0 8px; font-size:11px; }
-.ref .px{ font-family:var(--mono); font-size:22px; font-weight:600; }
-.ref .meta{ font-family:var(--mono); font-size:11px; color:var(--ink-faint); margin-top:5px; }
-.ref.SELL .px{ color:#ffb8c0; } .ref.BUY .px{ color:#a9e9dc; }
-.bank-row{ margin-top:10px; display:flex; gap:6px; }
-.bank-row input{ flex:1; min-width:0; background:var(--bg-void); border:1px solid var(--line-bright); color:var(--ink); border-radius:2px; padding:6px 7px; font-family:var(--mono); font-size:11.5px; }
-.bank-row button{ font-family:var(--disp); font-weight:600; letter-spacing:.04em; text-transform:uppercase; font-size:11px; padding:6px 10px; border-radius:2px; border:1px solid var(--line-bright); background:var(--bg-raised); color:var(--ink); cursor:pointer; }
-.bank-row button:active{ transform:translateY(1px); }
-.bank-check{ margin-top:7px; font-family:var(--mono); font-size:11px; }
+/* order books */
+.books{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.book h3{font-family:var(--disp);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-bottom:6px}
+.book .n{font-weight:400;opacity:.7}
+.book table{width:100%;border-collapse:collapse}
+.book th{font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);text-align:left;padding-bottom:4px;border-bottom:1px solid var(--line)}
+.book td{font-family:var(--mono);font-size:11.5px;color:var(--text);padding:2.5px 0}
+.book tr.mine td{color:var(--amber);font-weight:700}
+.my-status{font-family:var(--mono);font-size:10px;color:var(--faint);margin-top:6px;padding-top:6px;border-top:1px solid var(--line-faint)}
+.my-status.found{color:var(--cyan)}
 
-/* ---------- balance strip ---------- */
-.balance-strip{ display:flex; justify-content:space-between; align-items:center; font-family:var(--mono); font-size:11.5px; color:var(--ink-dim); padding:9px 12px; margin-bottom:12px; }
+/* chart */
+.chart-canvas{display:block;width:100%;height:140px}
+.chart-empty{font-family:var(--mono);font-size:11px;color:var(--faint);padding:20px 0;text-align:center}
 
-/* ---------- work session ---------- */
-.session-strip{ margin-bottom:12px; }
-.session-line{ font-family:var(--mono); font-size:12px; color:var(--ink-dim); line-height:1.7; margin-top:6px; }
+/* ledger */
+.ledger-summary{font-family:var(--mono);font-size:11.5px;color:var(--dim);margin:4px 0 10px;line-height:1.7}
+.ledger-scroll{overflow-x:auto}
+.ledger-scroll table{width:100%;border-collapse:collapse}
+.ledger-scroll th{font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);text-align:left;padding-bottom:4px;border-bottom:1px solid var(--line);white-space:nowrap}
+.ledger-scroll td{font-family:var(--mono);font-size:11px;color:var(--text);padding:3px 4px 3px 0;white-space:nowrap}
 
-/* ---------- orderbook ---------- */
-.books{ display:grid; grid-template-columns:1fr; gap:8px; margin-bottom:12px; }
-@media(min-width:860px){ .books{ grid-template-columns:1fr 1fr; } }
-.book h3{ display:flex; justify-content:space-between; align-items:baseline; }
-.book h3 .n{ font-family:var(--mono); font-size:10px; color:var(--ink-faint); text-transform:none; letter-spacing:0; }
-table{ width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12px; margin-top:8px; }
-th{ text-align:left; font-weight:500; color:var(--ink-faint); font-size:10px; letter-spacing:.06em; text-transform:uppercase; padding:4px 6px; border-bottom:1px solid var(--line); }
-td{ padding:5px 6px; border-bottom:1px solid var(--line); color:var(--ink-dim); }
-tr.mine{ background:rgba(255,179,0,.1); }
-tr.mine td{ color:var(--amber-soft); font-weight:600; }
-.my-status{ margin-top:8px; font-family:var(--mono); font-size:11px; color:var(--ink-faint); padding-top:8px; border-top:1px dashed var(--line); }
-.my-status.found{ color:var(--cyan); }
-
-/* ---------- price chart ---------- */
-.chart-wrap{ margin-bottom:12px; }
-.chart-canvas{ display:block; width:100%; height:140px; }
-.chart-empty{ font-family:var(--mono); font-size:11px; color:var(--ink-faint); padding:18px 0; text-align:center; }
-
-/* ---------- ledger ---------- */
-.ledger{ margin-bottom:12px; }
-.ledger-summary{ font-family:var(--mono); font-size:12px; color:var(--ink-dim); margin-top:8px; line-height:1.8; }
-.ledger-scroll{ max-height:260px; overflow-y:auto; margin-top:10px; border-top:1px solid var(--line); }
-.ledger-scroll table{ margin-top:0; }
-.ledger-scroll thead th{ position:sticky; top:0; background:var(--bg-panel); }
-
-footer{ text-align:center; font-family:var(--mono); font-size:10.5px; color:var(--ink-faint); padding:18px 0 0; }
+/* utilities */
+.pos{color:var(--cyan)} .neg{color:var(--red)} .warn-c{color:var(--amber)}
+.flash{animation:flash-bg .7s ease}
+@keyframes flash-bg{0%{background:rgba(255,179,0,.18)}100%{background:transparent}}
+footer{font-family:var(--mono);font-size:10px;color:var(--faint);text-align:center;padding:12px 0 0}
 </style>
 </head>
 <body>
-<div class="noise"></div>
-<div class="scan"></div>
-
 <div class="wrap">
 
-  <div class="topbar reveal">
-    <div class="brand">⌁ Terminal<small>USDT · IDR · Bank Transfer</small></div>
+  <div class="topbar">
+    <div class="brand">⌁ Terminal <small>USDT / IDR · Binance P2P</small></div>
     <div class="topbar-right">
-      <div class="live" id="live"><span class="dot"></span><span id="live-text">live</span></div>
+      <div id="live"><div class="dot"></div><span id="live-text">live</span></div>
       <div class="lang-toggle">
         <button id="lang-ru" data-lang="ru">RU</button>
         <button id="lang-en" data-lang="en">EN</button>
@@ -200,64 +178,89 @@ footer{ text-align:center; font-family:var(--mono); font-size:10.5px; color:var(
   <div class="klaxon" id="klaxon"></div>
   <div class="order-alert" id="order-alert"></div>
 
-  <section class="panel advice reveal" id="advice-panel" style="animation-delay:.05s">
+  <!-- ADVICE -->
+  <div class="card" id="advice-panel">
     <div class="advice-top">
       <span class="eyebrow" data-i18n="advice_now">Совет сейчас</span>
       <span class="side-badge" id="advice-side">—</span>
     </div>
     <div class="advice-text" id="advice-text" data-i18n="loading">Загрузка…</div>
-    <div class="advice-price" id="advice-price-wrap" style="display:none"><span class="cur">Rp</span><span id="advice-price">—</span></div>
+    <div class="advice-price-wrap" id="advice-price-wrap"><span class="cur">Rp</span><span id="advice-price">—</span></div>
     <ul class="advice-reasons" id="advice-reasons"></ul>
-    <div class="trend-strip flat" id="trend-strip"><span class="arrow">→</span><span id="trend-text" data-i18n="trend_loading">копим историю рынка…</span></div>
-    <div style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:13px">
+    <div class="trend-strip flat" id="trend-strip">
+      <span class="arrow">→</span>
+      <span id="trend-text" data-i18n="trend_loading">копим историю рынка…</span>
+    </div>
+    <div class="side-row">
       <span data-i18n="active_side_label">Сторона:</span>
-      <button type="button" class="side-override-btn" data-side="">Auto</button>
-      <button type="button" class="side-override-btn" data-side="BUY">BUY</button>
-      <button type="button" class="side-override-btn" data-side="SELL">SELL</button>
+      <button class="side-btn side-override-btn" data-side="">Auto</button>
+      <button class="side-btn side-override-btn" data-side="BUY">BUY</button>
+      <button class="side-btn side-override-btn" data-side="SELL">SELL</button>
     </div>
     <div class="auto-row">
-      <div class="auto-row-eyebrow" data-i18n="automation_title">Автоматика</div>
+      <span class="auto-row-label" data-i18n="automation_title">Автоматика</span>
       <label class="auto-toggle">
         <input type="checkbox" id="auto-reprice-checkbox">
         <span data-i18n="auto_reprice_label">Авто-перестановка цены</span>
       </label>
-      <div class="auto-toggle-status" id="auto-reprice-status"></div>
+      <div class="auto-status" id="auto-reprice-status"></div>
       <label class="auto-toggle">
         <input type="checkbox" id="order-watch-checkbox">
         <span data-i18n="order_watch_label">Слежение за ордерами</span>
       </label>
-      <div class="auto-toggle-status" id="order-watch-status"></div>
+      <div class="auto-status" id="order-watch-status"></div>
     </div>
-  </section>
+  </div>
 
-  <section class="gauges">
-    <div class="panel gauge reveal" style="animation-delay:.1s">
+  <!-- AGENT -->
+  <div class="card" id="agent-card">
+    <div class="agent-header">
+      <span class="agent-eyebrow">⌁ Агент</span>
+      <span class="agent-urgency" id="agent-urgency-label">—</span>
+    </div>
+    <div id="agent-title">Загрузка…</div>
+    <div id="agent-context"></div>
+    <ol id="agent-steps"></ol>
+    <div class="agent-btns" id="agent-btns" style="display:none">
+      <button class="btn-done" id="agent-done-btn">✓ Выполнено</button>
+      <button class="btn-skip" id="agent-skip-btn">Пропустить</button>
+    </div>
+    <div class="agent-hist-wrap" id="agent-history-wrap" style="display:none">
+      <div class="agent-hist-label">История</div>
+      <div class="agent-hist-list" id="agent-history-list"></div>
+    </div>
+  </div>
+
+  <!-- GAUGES -->
+  <div class="gauges">
+    <div class="card gauge">
       <span class="eyebrow" data-i18n="gauge_hourly">$ / час</span>
       <div class="val" id="g-hourly">—</div>
       <div class="sub" id="g-hourly-sub"></div>
     </div>
-    <div class="panel gauge reveal" style="animation-delay:.14s">
+    <div class="card gauge">
       <span class="eyebrow" data-i18n="gauge_visibility">Видимость</span>
       <div class="val" id="g-rank">—</div>
       <div class="sub" id="g-rank-sub"></div>
     </div>
-    <div class="panel gauge reveal" style="animation-delay:.18s">
+    <div class="card gauge">
       <span class="eyebrow" data-i18n="gauge_spread">Спред</span>
       <div class="val" id="g-spread">—</div>
       <div class="sub" id="g-spread-sub"></div>
     </div>
-  </section>
+  </div>
 
-  <section class="refs reveal" style="animation-delay:.22s">
-    <div class="panel ref SELL">
-      <h3 class="eyebrow" data-i18n="ref_sell">Sell · продать</h3>
-      <div class="px" id="rec-sell">—</div>
-      <div class="meta" id="best-buy-ref">—</div>
+  <!-- REFS + BANK -->
+  <div class="refs">
+    <div class="card ref SELL">
+      <span class="eyebrow" data-i18n="ref_sell">Sell · продать</span>
+      <div class="ref-px" id="rec-sell">—</div>
+      <div class="ref-meta" id="best-buy-ref">—</div>
     </div>
-    <div class="panel ref BUY">
-      <h3 class="eyebrow" data-i18n="ref_buy">Buy · купить</h3>
-      <div class="px" id="rec-buy">—</div>
-      <div class="meta" id="best-sell-ref">—</div>
+    <div class="card ref BUY">
+      <span class="eyebrow" data-i18n="ref_buy">Buy · купить</span>
+      <div class="ref-px" id="rec-buy">—</div>
+      <div class="ref-meta" id="best-sell-ref">—</div>
       <div class="bank-row">
         <input type="number" id="bank-balance-input" data-i18n-placeholder="bank_placeholder" placeholder="Банк, IDR">
         <button id="bank-balance-save" data-i18n="save">Сохр.</button>
@@ -265,47 +268,55 @@ footer{ text-align:center; font-family:var(--mono); font-size:10.5px; color:var(
       <div class="bank-check" id="bank-limit-check"></div>
       <div class="bank-check" id="suggested-limits"></div>
     </div>
-  </section>
+  </div>
 
-  <div class="panel session-strip reveal" style="animation-delay:.24s">
+  <!-- SESSION -->
+  <div class="card">
     <span class="eyebrow" data-i18n="work_session">Рабочая сессия</span>
     <div class="session-line" id="session-line">—</div>
   </div>
 
-  <div class="panel balance-strip reveal" style="animation-delay:.26s">
+  <!-- BALANCE -->
+  <div class="card balance-strip">
     <span data-i18n="balance">Баланс</span>
     <span id="balance-line">—</span>
   </div>
 
-  <section class="books reveal" style="animation-delay:.3s">
-    <div class="panel book">
-      <h3 class="eyebrow"><span data-i18n="book_buy_side">Buy-сторона</span> <span class="n" data-i18n="book_buy_side_hint">(где покупаешь ты)</span></h3>
+  <!-- ORDER BOOKS -->
+  <div class="books">
+    <div class="card book">
+      <h3><span data-i18n="book_buy_side">Buy-сторона</span> <span class="n" data-i18n="book_buy_side_hint">(где покупаешь ты)</span></h3>
       <table><thead><tr><th data-i18n="th_price">Цена</th><th>USDT</th><th data-i18n="th_merchant">Мерчант</th></tr></thead><tbody id="buy-table"></tbody></table>
       <div class="my-status" id="my-rank-in-buy-table"></div>
     </div>
-    <div class="panel book">
-      <h3 class="eyebrow"><span data-i18n="book_sell_side">Sell-сторона</span> <span class="n" data-i18n="book_sell_side_hint">(где продаёшь ты)</span></h3>
+    <div class="card book">
+      <h3><span data-i18n="book_sell_side">Sell-сторона</span> <span class="n" data-i18n="book_sell_side_hint">(где продаёшь ты)</span></h3>
       <table><thead><tr><th data-i18n="th_price">Цена</th><th>USDT</th><th data-i18n="th_merchant">Мерчант</th></tr></thead><tbody id="sell-table"></tbody></table>
       <div class="my-status" id="my-rank-in-sell-table"></div>
     </div>
-  </section>
+  </div>
 
-  <section class="panel chart-wrap reveal" style="animation-delay:.32s">
+  <!-- CHART -->
+  <div class="card">
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px">
       <span class="eyebrow" data-i18n="chart_title">График цены · 15 мин</span>
-      <span id="chart-legend" style="font-family:var(--mono);font-size:10px;color:var(--ink-faint)"></span>
+      <span id="chart-legend" style="font-family:var(--mono);font-size:10px;color:var(--faint)"></span>
     </div>
     <canvas id="price-chart" class="chart-canvas"></canvas>
     <div id="chart-empty" class="chart-empty" style="display:none" data-i18n="chart_empty">копим историю…</div>
-  </section>
+  </div>
 
-  <section class="panel ledger reveal" style="animation-delay:.34s">
+  <!-- LEDGER -->
+  <div class="card">
     <span class="eyebrow" data-i18n="ledger_title">Журнал сделок</span>
     <div class="ledger-summary" id="pnl-summary">—</div>
     <div class="ledger-scroll">
-      <table><thead><tr><th data-i18n="th_time">Время</th><th data-i18n="th_side">Сторона</th><th>USDT</th><th data-i18n="th_rate">Курс</th><th>IDR</th><th data-i18n="th_profit">Прибыль</th></tr></thead><tbody id="pnl-table"></tbody></table>
+      <table>
+        <thead><tr><th data-i18n="th_time">Время</th><th data-i18n="th_side">Сторона</th><th>USDT</th><th data-i18n="th_rate">Курс</th><th>IDR</th><th data-i18n="th_profit">Прибыль</th></tr></thead>
+        <tbody id="pnl-table"></tbody>
+      </table>
     </div>
-  </section>
+  </div>
 
   <footer id="last-update">—</footer>
 </div>
@@ -322,6 +333,8 @@ const I18N = {
     auto_reprice_tripped: "⚠ остановлено автоматически: {msg}",
     auto_reprice_paused_watch_off: "⏸ ждёт: слежение за ордерами выключено",
     auto_reprice_paused_pnl: "⏸ ждёт: данные P&L ещё не готовы",
+    auto_reprice_paused_pnl_stale: "🔴 СТОП: данные P&L устарели {s}с — floor не защищён, репрайс заблокирован",
+    auto_reprice_paused_market_stale: "🔴 СТОП: рыночные данные устарели {s}с — репрайс заблокирован",
     auto_reprice_paused_pending: "⏸ ждёт: открыт ордер, идёт оплата",
     auto_reprice_paused_below_be: "⏸ ждёт: рынок ниже безубытка",
     order_watch_label: "Слежение за ордерами",
@@ -375,6 +388,8 @@ const I18N = {
     auto_reprice_tripped: "⚠ auto-disabled: {msg}",
     auto_reprice_paused_watch_off: "⏸ waiting: order watch is off",
     auto_reprice_paused_pnl: "⏸ waiting: P&L data not ready yet",
+    auto_reprice_paused_pnl_stale: "🔴 BLOCKED: P&L data is {s}s stale — floor unprotected, reprice disabled",
+    auto_reprice_paused_market_stale: "🔴 BLOCKED: market data is {s}s stale — reprice disabled",
     auto_reprice_paused_pending: "⏸ waiting: an order is open for payment",
     auto_reprice_paused_below_be: "⏸ waiting: market below breakeven",
     order_watch_label: "Order watch",
@@ -421,36 +436,30 @@ const I18N = {
   },
 };
 let lang = localStorage.getItem("lang") || "ru";
-
 function t(key, vars){
   let s = (I18N[lang] && I18N[lang][key]) || key;
   if(vars) for(const k in vars) s = s.split("{"+k+"}").join(vars[k]);
   return s;
 }
-function dirWord(code){ return code === "up" ? t("dir_up") : code === "down" ? t("dir_down") : t("dir_flat"); }
-
+function dirWord(code){ return code==="up"?t("dir_up"):code==="down"?t("dir_down"):t("dir_flat"); }
 function applyStaticI18n(){
   document.documentElement.lang = lang;
-  document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.getAttribute("data-i18n")); });
-  document.querySelectorAll("[data-i18n-placeholder]").forEach(el => { el.placeholder = t(el.getAttribute("data-i18n-placeholder")); });
-  document.getElementById("lang-ru").classList.toggle("active", lang === "ru");
-  document.getElementById("lang-en").classList.toggle("active", lang === "en");
+  document.querySelectorAll("[data-i18n]").forEach(el=>{ el.textContent=t(el.getAttribute("data-i18n")); });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach(el=>{ el.placeholder=t(el.getAttribute("data-i18n-placeholder")); });
+  document.getElementById("lang-ru").classList.toggle("active", lang==="ru");
+  document.getElementById("lang-en").classList.toggle("active", lang==="en");
 }
 function setLang(l){
-  lang = l;
-  localStorage.setItem("lang", l);
-  applyStaticI18n();
-  // Re-fetch everything now rather than waiting for each panel's own poll
-  // interval (up to 90s) - a language switch should repaint immediately.
+  lang=l; localStorage.setItem("lang",l); applyStaticI18n();
   refreshOrderbook(); refreshAdvice(); refreshEarnings(); refreshPnl(); refreshBalance(); refreshWorkSession();
 }
-document.getElementById("lang-ru").addEventListener("click", () => setLang("ru"));
-document.getElementById("lang-en").addEventListener("click", () => setLang("en"));
+document.getElementById("lang-ru").addEventListener("click",()=>setLang("ru"));
+document.getElementById("lang-en").addEventListener("click",()=>setLang("en"));
 applyStaticI18n();
 
 /* ---------- helpers ---------- */
-function fmt(n){ return n==null ? "—" : Number(n).toLocaleString("id-ID"); }
-function fmtTime(ms){ return new Date(ms).toLocaleString(lang === "ru" ? "ru-RU" : "en-GB"); }
+function fmt(n){ return n==null?"—":Number(n).toLocaleString("id-ID"); }
+function fmtTime(ms){ return new Date(ms).toLocaleString(lang==="ru"?"ru-RU":"en-GB"); }
 function flash(el){ el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
 
 const MY_NICKNAME = "bandurkas";
@@ -459,620 +468,518 @@ let lastBuyAdMaxLimit = null;
 let lastAdvicePrice = null;
 let lastHourly = null;
 
-/* ---------- fill sound (coins) ----------
-   Synthesized, not an audio file - browsers won't let a tab make sound
-   before the user has clicked something on the page at least once, so
-   the very first fill after a fresh page load may be silent until that
-   happens. */
+/* ---------- audio ---------- */
 let audioCtx = null;
 let lastTradeCount = null;
 function unlockAudio(){
-  if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if(audioCtx.state === "suspended") audioCtx.resume();
+  if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  if(audioCtx.state==="suspended") audioCtx.resume();
 }
-document.addEventListener("click", unlockAudio, {once: true});
-
+document.addEventListener("click", unlockAudio, {once:true});
 function playCoinSound(){
   if(!audioCtx) return;
   const now = audioCtx.currentTime;
-  const blip = (freq, t0, dur, type, peak) => {
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = type;
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0.0001, t0);
-    gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  const blip = (freq,t0,dur,type,peak) => {
+    const osc=audioCtx.createOscillator(), gain=audioCtx.createGain();
+    osc.type=type; osc.frequency.value=freq;
+    gain.gain.setValueAtTime(0.0001,t0);
+    gain.gain.exponentialRampToValueAtTime(peak,t0+0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
     osc.connect(gain).connect(audioCtx.destination);
-    osc.start(t0);
-    osc.stop(t0 + dur + 0.02);
+    osc.start(t0); osc.stop(t0+dur+0.02);
   };
-  blip(988, now, 0.10, "square", 0.18);          // classic two-note "cha-ching"
-  blip(1568, now + 0.06, 0.16, "square", 0.18);
-  for(let i = 0; i < 7; i++){                     // coins clattering after
-    const t0 = now + 0.15 + i * 0.045 + Math.random() * 0.02;
-    const freq = 1800 + Math.random() * 1400;
-    blip(freq, t0, 0.07, "triangle", 0.08);
+  blip(988,now,0.10,"square",0.18);
+  blip(1568,now+0.06,0.16,"square",0.18);
+  for(let i=0;i<7;i++){
+    const t0=now+0.15+i*0.045+Math.random()*0.02;
+    blip(1800+Math.random()*1400,t0,0.07,"triangle",0.08);
   }
 }
-
-/* ---------- order-taken alert (someone opened an order, 15min to pay) ----------
-   Deliberately distinct from playCoinSound (that one means "a trade finished
-   and money is real" - this one means "go to the bank app right now"), and
-   repeated 2-3 times with gaps since this is the one notification on the
-   whole dashboard with a hard clock attached to it. */
 function playOrderAlertSound(){
   if(!audioCtx) return;
-  const now = audioCtx.currentTime;
-  const blip = (freq, t0, dur, type, peak) => {
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = type;
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0.0001, t0);
-    gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  const now=audioCtx.currentTime;
+  const blip=(freq,t0,dur,type,peak)=>{
+    const osc=audioCtx.createOscillator(),gain=audioCtx.createGain();
+    osc.type=type; osc.frequency.value=freq;
+    gain.gain.setValueAtTime(0.0001,t0);
+    gain.gain.exponentialRampToValueAtTime(peak,t0+0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
     osc.connect(gain).connect(audioCtx.destination);
-    osc.start(t0);
-    osc.stop(t0 + dur + 0.02);
+    osc.start(t0); osc.stop(t0+dur+0.02);
   };
-  for(let burst = 0; burst < 3; burst++){
-    const t0 = now + burst * 0.55;
-    blip(1320, t0, 0.16, "sawtooth", 0.22);
-    blip(880, t0 + 0.18, 0.16, "sawtooth", 0.22);
+  for(let burst=0;burst<3;burst++){
+    const t0=now+burst*0.55;
+    blip(1320,t0,0.16,"sawtooth",0.22);
+    blip(880,t0+0.18,0.16,"sawtooth",0.22);
   }
 }
 
 /* ---------- orderbook ---------- */
 async function refreshOrderbook(){
   try{
-    const r = await fetch("/api/orderbook");
-    const d = await r.json();
-
-    document.getElementById("rec-sell").textContent = d.recommended.sell_usdt_at ? fmt(d.recommended.sell_usdt_at) : "—";
-    document.getElementById("rec-buy").textContent = d.recommended.buy_usdt_at ? fmt(d.recommended.buy_usdt_at) : "—";
-    document.getElementById("best-buy-ref").textContent = t("top_competitor", {price: fmt(d.best_buy_price)});
-    document.getElementById("best-sell-ref").textContent = t("top_competitor", {price: fmt(d.best_sell_price)});
-
-    document.getElementById("g-spread").textContent = d.spread_idr != null ? "Rp " + fmt(d.spread_idr) : "—";
-    document.getElementById("g-spread-sub").textContent = d.spread_pct != null ? d.spread_pct.toFixed(3) + "%" : "—";
-
-    const ageSec = (Date.now()/1000 - d.timestamp);
-    const liveEl = document.getElementById("live");
-    const liveText = document.getElementById("live-text");
-    if(ageSec > 20){
-      liveEl.classList.add("stale");
-      liveText.textContent = t("stale", {s: ageSec.toFixed(0)});
-    } else {
-      liveEl.classList.remove("stale");
-      liveText.textContent = t("live");
-    }
-
-    const rowHtml = a => {
-      const mine = (a.merchant || "").toLowerCase() === MY_NICKNAME;
+    const r=await fetch("/api/orderbook");
+    const d=await r.json();
+    document.getElementById("rec-sell").textContent=d.recommended.sell_usdt_at?fmt(d.recommended.sell_usdt_at):"—";
+    document.getElementById("rec-buy").textContent=d.recommended.buy_usdt_at?fmt(d.recommended.buy_usdt_at):"—";
+    document.getElementById("best-buy-ref").textContent=t("top_competitor",{price:fmt(d.best_buy_price)});
+    document.getElementById("best-sell-ref").textContent=t("top_competitor",{price:fmt(d.best_sell_price)});
+    document.getElementById("g-spread").textContent=d.spread_idr!=null?"Rp "+fmt(d.spread_idr):"—";
+    document.getElementById("g-spread-sub").textContent=d.spread_pct!=null?d.spread_pct.toFixed(3)+"%":"—";
+    const ageSec=(Date.now()/1000-d.timestamp);
+    const liveEl=document.getElementById("live");
+    const liveText=document.getElementById("live-text");
+    if(ageSec>20){ liveEl.classList.add("stale"); liveText.textContent=t("stale",{s:ageSec.toFixed(0)}); }
+    else { liveEl.classList.remove("stale"); liveText.textContent=t("live"); }
+    const rowHtml=a=>{
+      const mine=(a.merchant||"").toLowerCase()===MY_NICKNAME;
       return `<tr class="${mine?'mine':''}"><td>${fmt(a.price)}</td><td>${a.available.toFixed(0)}</td><td>${a.merchant}${mine?' ★':''}</td></tr>`;
     };
-    document.querySelector("#buy-table").innerHTML = d.buy_ads.map(rowHtml).join("");
-    document.querySelector("#sell-table").innerHTML = d.sell_ads.map(rowHtml).join("");
-
-    const myRankText = (ad) => {
-      if(!ad) return {text: t("ad_status_missing"), found:false};
-      return {text: t("ad_status_found", {rank:ad.rank, total:ad.total, price:fmt(ad.price), avail:ad.available.toFixed(0)}), found:true};
-    };
-    const sellInfo = myRankText(d.my_sell_ad);
-    const buyInfo = myRankText(d.my_buy_ad);
-    const buyTableStatus = document.getElementById("my-rank-in-buy-table");
-    buyTableStatus.textContent = sellInfo.text; buyTableStatus.classList.toggle("found", sellInfo.found);
-    const sellTableStatus = document.getElementById("my-rank-in-sell-table");
-    sellTableStatus.textContent = buyInfo.text; sellTableStatus.classList.toggle("found", buyInfo.found);
-
-    lastBuyAdMaxLimit = d.my_buy_ad ? d.my_buy_ad.max_limit : null;
+    document.querySelector("#buy-table").innerHTML=d.buy_ads.map(rowHtml).join("");
+    document.querySelector("#sell-table").innerHTML=d.sell_ads.map(rowHtml).join("");
+    const myRankText=ad=>ad
+      ?{text:t("ad_status_found",{rank:ad.rank,total:ad.total,price:fmt(ad.price),avail:ad.available.toFixed(0)}),found:true}
+      :{text:t("ad_status_missing"),found:false};
+    const sellInfo=myRankText(d.my_sell_ad);
+    const buyInfo=myRankText(d.my_buy_ad);
+    const buyTableStatus=document.getElementById("my-rank-in-buy-table");
+    buyTableStatus.textContent=sellInfo.text; buyTableStatus.classList.toggle("found",sellInfo.found);
+    const sellTableStatus=document.getElementById("my-rank-in-sell-table");
+    sellTableStatus.textContent=buyInfo.text; sellTableStatus.classList.toggle("found",buyInfo.found);
+    lastBuyAdMaxLimit=d.my_buy_ad?d.my_buy_ad.max_limit:null;
     renderBankLimitCheck();
-
-    renderVisibilityGauge(d.my_sell_ad, d.my_buy_ad);
-
-    document.getElementById("last-update").textContent = t("updated", {t: new Date().toLocaleTimeString(lang === "ru" ? "ru-RU" : "en-GB")});
-  } catch(e){
-    document.getElementById("live-text").textContent = t("backend_down");
+    renderVisibilityGauge(d.my_sell_ad,d.my_buy_ad);
+    document.getElementById("last-update").textContent=t("updated",{t:new Date().toLocaleTimeString(lang==="ru"?"ru-RU":"en-GB")});
+  }catch(e){
+    document.getElementById("live-text").textContent=t("backend_down");
     document.getElementById("live").classList.add("stale");
   }
 }
 
-let lastOwnAds = {sell:null, buy:null};
-function renderVisibilityGauge(mySellAd, myBuyAd){
-  lastOwnAds = {sell:mySellAd, buy:myBuyAd};
-  const side = window.activeSide || "SELL";
-  const ad = side === "SELL" ? mySellAd : myBuyAd;
-  const el = document.getElementById("g-rank");
-  const sub = document.getElementById("g-rank-sub");
-  if(!ad){
-    el.textContent = t("no_ad"); el.className = "val neg";
-    sub.textContent = t("no_ad_sub");
-    return;
-  }
-  el.textContent = "#" + ad.rank;
-  el.className = "val " + (ad.rank <= 5 ? "pos" : "warn-c");
-  sub.textContent = t("of_total", {total: ad.total, side: side});
+let lastOwnAds={sell:null,buy:null};
+function renderVisibilityGauge(mySellAd,myBuyAd){
+  lastOwnAds={sell:mySellAd,buy:myBuyAd};
+  const side=window.activeSide||"SELL";
+  const ad=side==="SELL"?mySellAd:myBuyAd;
+  const el=document.getElementById("g-rank");
+  const sub=document.getElementById("g-rank-sub");
+  if(!ad){ el.textContent=t("no_ad"); el.className="val neg"; sub.textContent=t("no_ad_sub"); return; }
+  el.textContent="#"+ad.rank;
+  el.className="val "+(ad.rank<=5?"pos":"warn-c");
+  sub.textContent=t("of_total",{total:ad.total,side});
 }
 
 /* ---------- advice ---------- */
 async function refreshAdvice(){
   try{
-    const r = await fetch("/api/advice?lang=" + lang);
-    const d = await r.json();
-    window.activeSide = d.side;
-
-    const panel = document.getElementById("advice-panel");
-    panel.classList.remove("state-push","state-trend","state-debt","state-tight","state-wide","state-floor","state-urgent");
-    panel.classList.add("state-" + d.state);
+    const r=await fetch("/api/advice?lang="+lang);
+    const d=await r.json();
+    window.activeSide=d.side;
+    const panel=document.getElementById("advice-panel");
+    panel.className="card";
+    panel.classList.add("state-"+d.state);
     if(d.market_against) panel.classList.add("state-urgent");
-
-    const badge = document.getElementById("advice-side");
-    badge.textContent = d.side || "—";
-    badge.className = "side-badge " + (d.side || "");
-
+    const badge=document.getElementById("advice-side");
+    badge.textContent=d.side||"—";
+    badge.className="side-badge "+(d.side||"");
     document.getElementById("advice-text").removeAttribute("data-i18n");
-    document.getElementById("advice-text").textContent = d.advice;
-
-    const priceWrap = document.getElementById("advice-price-wrap");
-    const priceEl = document.getElementById("advice-price");
-    if(d.recommended_price != null){
-      priceWrap.style.display = "block";
-      priceEl.textContent = fmt(Math.round(d.recommended_price));
-      if(lastAdvicePrice !== null && lastAdvicePrice !== d.recommended_price) flash(priceWrap);
-      lastAdvicePrice = d.recommended_price;
-    } else {
-      priceWrap.style.display = "none";
-    }
-
-    document.getElementById("advice-reasons").innerHTML = (d.reasons||[]).map(x=>`<li>${x}</li>`).join("");
-
-    const klaxon = document.getElementById("klaxon");
-    klaxon.classList.toggle("show", !!d.market_against);
-    if(d.market_against) klaxon.textContent = t("klaxon", {dir: dirWord(d.market_direction)});
-
-    const strip = document.getElementById("trend-strip");
-    const text = document.getElementById("trend-text");
+    document.getElementById("advice-text").textContent=d.advice;
+    const priceWrap=document.getElementById("advice-price-wrap");
+    const priceEl=document.getElementById("advice-price");
+    if(d.recommended_price!=null){
+      priceWrap.style.display="block";
+      priceEl.textContent=fmt(Math.round(d.recommended_price));
+      if(lastAdvicePrice!==null&&lastAdvicePrice!==d.recommended_price) flash(priceWrap);
+      lastAdvicePrice=d.recommended_price;
+    } else { priceWrap.style.display="none"; }
+    document.getElementById("advice-reasons").innerHTML=(d.reasons||[]).map(x=>`<li>${x}</li>`).join("");
+    const klaxon=document.getElementById("klaxon");
+    klaxon.classList.toggle("show",!!d.market_against);
+    if(d.market_against) klaxon.textContent=t("klaxon",{dir:dirWord(d.market_direction)});
+    const strip=document.getElementById("trend-strip");
+    const text=document.getElementById("trend-text");
     text.removeAttribute("data-i18n");
-    strip.classList.remove("against","with","flat");
-    if(d.market_trend_idr_per_min == null){
+    strip.className="trend-strip";
+    if(d.market_trend_idr_per_min==null){
       strip.classList.add("flat");
-      strip.querySelector(".arrow").textContent = "→";
-      text.textContent = t("trend_loading");
+      strip.querySelector(".arrow").textContent="→";
+      text.textContent=t("trend_loading");
     } else {
-      const speed = Math.abs(d.market_trend_idr_per_min).toFixed(1);
-      const arrow = d.market_direction === "up" ? "↑" : d.market_direction === "down" ? "↓" : "→";
-      strip.querySelector(".arrow").textContent = arrow;
-      const dir = dirWord(d.market_direction);
-      if(d.market_against){ strip.classList.add("against"); text.textContent = t("trend_against", {dir, speed}); }
-      else if(d.market_direction === "flat"){ strip.classList.add("flat"); text.textContent = t("trend_stable"); }
-      else { strip.classList.add("with"); text.textContent = t("trend_with", {dir, speed}); }
+      const speed=Math.abs(d.market_trend_idr_per_min).toFixed(1);
+      const arrow=d.market_direction==="up"?"↑":d.market_direction==="down"?"↓":"→";
+      strip.querySelector(".arrow").textContent=arrow;
+      const dir=dirWord(d.market_direction);
+      if(d.market_against){ strip.classList.add("against"); text.textContent=t("trend_against",{dir,speed}); }
+      else if(d.market_direction==="flat"){ strip.classList.add("flat"); text.textContent=t("trend_stable"); }
+      else { strip.classList.add("with"); text.textContent=t("trend_with",{dir,speed}); }
     }
-
-    renderVisibilityGauge(lastOwnAds.sell, lastOwnAds.buy);
-  } catch(e){
-    document.getElementById("advice-text").textContent = "⚠ " + e;
+    renderVisibilityGauge(lastOwnAds.sell,lastOwnAds.buy);
+  }catch(e){
+    document.getElementById("advice-text").textContent="⚠ "+e;
   }
 }
 
 /* ---------- active side override ---------- */
 async function refreshActiveSideOverride(){
   try{
-    const r = await fetch("/api/active-side");
-    const d = await r.json();
-    document.querySelectorAll(".side-override-btn").forEach(btn => {
-      const side = btn.dataset.side || null;
-      btn.classList.toggle("active", side === d.override);
+    const r=await fetch("/api/active-side");
+    const d=await r.json();
+    document.querySelectorAll(".side-override-btn").forEach(btn=>{
+      btn.classList.toggle("active",(btn.dataset.side||null)===d.override);
     });
-  } catch(e){ /* non-critical - just leaves buttons in last-known state */ }
+  }catch(e){}
 }
-document.querySelectorAll(".side-override-btn").forEach(btn => {
-  btn.addEventListener("click", async () => {
-    const side = btn.dataset.side || null;
-    await fetch("/api/active-side", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({override: side}),
-    });
-    await refreshActiveSideOverride();
-    refreshAdvice();
+document.querySelectorAll(".side-override-btn").forEach(btn=>{
+  btn.addEventListener("click",async()=>{
+    await fetch("/api/active-side",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({override:btn.dataset.side||null})});
+    await refreshActiveSideOverride(); refreshAdvice();
   });
 });
 
-/* ---------- auto-reprice toggle ---------- */
-let autoRepriceSyncing = false;
+/* ---------- auto-reprice ---------- */
+let autoRepriceSyncing=false;
 async function refreshAutoReprice(){
   try{
-    const r = await fetch("/api/auto-reprice");
-    const d = await r.json();
-    const checkbox = document.getElementById("auto-reprice-checkbox");
-    autoRepriceSyncing = true;
-    checkbox.checked = !!d.enabled;
-    autoRepriceSyncing = false;
-    const statusEl = document.getElementById("auto-reprice-status");
-    if(!d.enabled && d.last_result && d.last_result.message && !d.last_result.ok && checkbox.dataset.wasOn === "1"){
-      // Kill switch tripped itself mid-flight (e.g. a verification challenge) - surface it loudly.
-      statusEl.innerHTML = `<span class="neg">${t("auto_reprice_tripped", {msg: d.last_result.message})}</span>`;
-    } else if(d.enabled && !d.market_above_breakeven){
-      statusEl.innerHTML = `<span class="warn-c">${t("auto_reprice_paused_below_be")}</span>`;
-    } else if(d.enabled && !d.order_watch_enabled){
-      statusEl.innerHTML = `<span class="warn-c">${t("auto_reprice_paused_watch_off")}</span>`;
-    } else if(d.enabled && !d.pnl_ready){
-      statusEl.innerHTML = `<span class="warn-c">${t("auto_reprice_paused_pnl")}</span>`;
-    } else if(d.enabled && d.has_pending_order){
-      statusEl.innerHTML = `<span class="warn-c">${t("auto_reprice_paused_pending")}</span>`;
+    const r=await fetch("/api/auto-reprice");
+    const d=await r.json();
+    const checkbox=document.getElementById("auto-reprice-checkbox");
+    autoRepriceSyncing=true; checkbox.checked=!!d.enabled; autoRepriceSyncing=false;
+    const statusEl=document.getElementById("auto-reprice-status");
+    if(!d.enabled&&d.last_result&&d.last_result.message&&!d.last_result.ok&&checkbox.dataset.wasOn==="1"){
+      statusEl.innerHTML=`<span class="neg">${t("auto_reprice_tripped",{msg:d.last_result.message})}</span>`;
+    } else if(d.enabled&&d.pnl_stale){
+      statusEl.innerHTML=`<span class="neg">${t("auto_reprice_paused_pnl_stale",{s:d.pnl_age_sec})}</span>`;
+    } else if(d.enabled&&d.market_stale){
+      statusEl.innerHTML=`<span class="neg">${t("auto_reprice_paused_market_stale",{s:d.market_age_sec})}</span>`;
+    } else if(d.enabled&&!d.market_above_breakeven){
+      statusEl.innerHTML=`<span class="warn-c">${t("auto_reprice_paused_below_be")}</span>`;
+    } else if(d.enabled&&!d.order_watch_enabled){
+      statusEl.innerHTML=`<span class="warn-c">${t("auto_reprice_paused_watch_off")}</span>`;
+    } else if(d.enabled&&!d.pnl_ready){
+      statusEl.innerHTML=`<span class="warn-c">${t("auto_reprice_paused_pnl")}</span>`;
+    } else if(d.enabled&&d.has_pending_order){
+      statusEl.innerHTML=`<span class="warn-c">${t("auto_reprice_paused_pending")}</span>`;
     } else if(d.enabled){
-      const msg = d.last_result ? d.last_result.message : "";
-      statusEl.textContent = t("auto_reprice_on", {msg});
+      statusEl.textContent=t("auto_reprice_on",{msg:d.last_result?d.last_result.message:""});
     } else {
-      statusEl.textContent = t("auto_reprice_off");
+      statusEl.textContent=t("auto_reprice_off");
     }
-    checkbox.dataset.wasOn = d.enabled ? "1" : "0";
-  } catch(e){
-    document.getElementById("auto-reprice-status").textContent = "⚠ " + e;
-  }
+    checkbox.dataset.wasOn=d.enabled?"1":"0";
+  }catch(e){ document.getElementById("auto-reprice-status").textContent="⚠ "+e; }
 }
-document.getElementById("auto-reprice-checkbox").addEventListener("change", async (e) => {
+document.getElementById("auto-reprice-checkbox").addEventListener("change",async(e)=>{
   if(autoRepriceSyncing) return;
-  await fetch("/api/auto-reprice", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({enabled: e.target.checked}),
-  });
+  await fetch("/api/auto-reprice",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:e.target.checked})});
   refreshAutoReprice();
 });
 
-/* ---------- order-watch toggle ----------
-   Grouped with auto-reprice above because auto_reprice_loop refuses to fire
-   while this is off (a stale has_pending() reading can't be trusted) - the
-   two toggles are read as one "automation" decision, not independent. */
-let orderWatchSyncing = false;
+/* ---------- order-watch ---------- */
+let orderWatchSyncing=false;
 async function refreshOrderWatch(){
   try{
-    const r = await fetch("/api/order-watch");
-    const d = await r.json();
-    const checkbox = document.getElementById("order-watch-checkbox");
-    orderWatchSyncing = true;
-    checkbox.checked = !!d.enabled;
-    orderWatchSyncing = false;
-    const statusEl = document.getElementById("order-watch-status");
-    if(d.enabled && lastPendingCount > 0){
-      statusEl.textContent = t("order_watch_pending");
-    } else if(d.enabled && d.market_above_breakeven === false){
-      statusEl.textContent = t("order_watch_below_be");
-    } else {
-      statusEl.textContent = d.enabled ? t("order_watch_on") : t("order_watch_off");
-    }
-  } catch(e){
-    document.getElementById("order-watch-status").textContent = "⚠ " + e;
-  }
+    const r=await fetch("/api/order-watch");
+    const d=await r.json();
+    const checkbox=document.getElementById("order-watch-checkbox");
+    orderWatchSyncing=true; checkbox.checked=!!d.enabled; orderWatchSyncing=false;
+    const statusEl=document.getElementById("order-watch-status");
+    if(d.enabled&&lastPendingCount>0){ statusEl.textContent=t("order_watch_pending"); }
+    else if(d.enabled&&d.market_above_breakeven===false){ statusEl.textContent=t("order_watch_below_be"); }
+    else { statusEl.textContent=d.enabled?t("order_watch_on"):t("order_watch_off"); }
+  }catch(e){ document.getElementById("order-watch-status").textContent="⚠ "+e; }
 }
-document.getElementById("order-watch-checkbox").addEventListener("change", async (e) => {
+document.getElementById("order-watch-checkbox").addEventListener("change",async(e)=>{
   if(orderWatchSyncing) return;
-  await fetch("/api/order-watch", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({enabled: e.target.checked}),
-  });
-  refreshOrderWatch();
-  refreshAutoReprice();  // its pause reason may have just changed
+  await fetch("/api/order-watch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:e.target.checked})});
+  refreshOrderWatch(); refreshAutoReprice();
 });
 
 /* ---------- earnings ---------- */
 async function refreshEarnings(){
   try{
-    const r = await fetch("/api/earnings");
-    const d = await r.json();
-    const elH = document.getElementById("g-hourly");
-    const elSub = document.getElementById("g-hourly-sub");
-    if(d.error || d.idr_per_hour == null){
-      elH.textContent = "—"; elH.className = "val";
-      elSub.textContent = d.error ? d.error : t("session_just_started");
-      return;
-    }
-    elH.textContent = (d.idr_per_hour >= 0 ? "+" : "") + fmt(Math.round(d.idr_per_hour));
-    elH.className = "val " + (d.idr_per_hour >= 0 ? "pos" : "neg");
-    if(lastHourly !== null && lastHourly !== d.idr_per_hour) flash(elH);
-    lastHourly = d.idr_per_hour;
-    elSub.textContent = t("hourly_sub", {usd: d.usd_per_hour.toFixed(3), h: d.session_hours_elapsed.toFixed(1)});
-  } catch(e){
-    document.getElementById("g-hourly").textContent = "⚠";
-  }
+    const r=await fetch("/api/earnings");
+    const d=await r.json();
+    const elH=document.getElementById("g-hourly");
+    const elSub=document.getElementById("g-hourly-sub");
+    if(d.error||d.idr_per_hour==null){ elH.textContent="—"; elH.className="val"; elSub.textContent=d.error?d.error:t("session_just_started"); return; }
+    elH.textContent=(d.idr_per_hour>=0?"+":"")+fmt(Math.round(d.idr_per_hour));
+    elH.className="val "+(d.idr_per_hour>=0?"pos":"neg");
+    if(lastHourly!==null&&lastHourly!==d.idr_per_hour) flash(elH);
+    lastHourly=d.idr_per_hour;
+    elSub.textContent=t("hourly_sub",{usd:d.usd_per_hour.toFixed(3),h:d.session_hours_elapsed.toFixed(1)});
+  }catch(e){ document.getElementById("g-hourly").textContent="⚠"; }
 }
 
-/* ---------- pnl ledger ---------- */
+/* ---------- pnl ---------- */
 async function refreshPnl(){
   try{
-    const r = await fetch("/api/pnl");
-    const d = await r.json();
-    if(d.error){ document.getElementById("pnl-summary").textContent = t("pnl_error", {e: d.error}); return; }
+    const r=await fetch("/api/pnl");
+    const d=await r.json();
+    if(d.error){ document.getElementById("pnl-summary").textContent=t("pnl_error",{e:d.error}); return; }
     if(!d.summary) return;
-    const s = d.summary;
-    if(lastTradeCount !== null && s.total_trades > lastTradeCount) playCoinSound();
-    lastTradeCount = s.total_trades;
-    const cls = s.realized_pnl_idr >= 0 ? "pos" : "neg";
-    const pnlSpan = `<span class="${cls}">Rp ${fmt(Math.round(s.realized_pnl_idr))}</span>`;
-    let html = t("pnl_summary", {pnl: pnlSpan, cycles: s.matched_cycles, trades: s.total_trades});
-    if(s.open_tracked_usdt > 0){
-      html += "<br>" + t("pnl_open", {usdt: s.open_tracked_usdt.toFixed(0), price: fmt(s.open_tracked_avg_cost_idr)});
-    }
-    if(s.open_sell_remainder_usdt > 0){
-      html += "<br>" + t("pnl_debt", {usdt: s.open_sell_remainder_usdt.toFixed(0)});
-    } else if(s.open_buy_surplus_usdt > 0){
-      html += "<br>" + t("pnl_surplus", {usdt: s.open_buy_surplus_usdt.toFixed(0)});
-    }
-    document.getElementById("pnl-summary").innerHTML = html;
-    document.querySelector("#pnl-table").innerHTML = d.cycles.slice().reverse().map(c => {
-      let profitCell = "—";
-      if(c.side === "SELL" && c.profit_idr != null){
-        const pcls = c.profit_idr >= 0 ? "pos" : "neg";
-        profitCell = `<span class="${pcls}">Rp ${fmt(Math.round(c.profit_idr))}</span>`;
-        if(c.unmatched_usdt > 0) profitCell += " ⚠";
-      } else if(c.side === "BUY" && c.unrealized_profit_idr != null){
-        const pcls = c.unrealized_profit_idr >= 0 ? "pos" : "neg";
-        profitCell = `<span class="${pcls}">~Rp ${fmt(Math.round(c.unrealized_profit_idr))}</span>`;
+    const s=d.summary;
+    if(lastTradeCount!==null&&s.total_trades>lastTradeCount) playCoinSound();
+    lastTradeCount=s.total_trades;
+    const cls=s.realized_pnl_idr>=0?"pos":"neg";
+    const pnlSpan=`<span class="${cls}">Rp ${fmt(Math.round(s.realized_pnl_idr))}</span>`;
+    let html=t("pnl_summary",{pnl:pnlSpan,cycles:s.matched_cycles,trades:s.total_trades});
+    if(s.open_tracked_usdt>0) html+="<br>"+t("pnl_open",{usdt:s.open_tracked_usdt.toFixed(0),price:fmt(s.open_tracked_avg_cost_idr)});
+    if(s.open_sell_remainder_usdt>0) html+="<br>"+t("pnl_debt",{usdt:s.open_sell_remainder_usdt.toFixed(0)});
+    else if(s.open_buy_surplus_usdt>0) html+="<br>"+t("pnl_surplus",{usdt:s.open_buy_surplus_usdt.toFixed(0)});
+    document.getElementById("pnl-summary").innerHTML=html;
+    document.querySelector("#pnl-table").innerHTML=d.cycles.slice().reverse().map(c=>{
+      let profitCell="—";
+      if(c.side==="SELL"&&c.profit_idr!=null){
+        const pcls=c.profit_idr>=0?"pos":"neg";
+        profitCell=`<span class="${pcls}">Rp ${fmt(Math.round(c.profit_idr))}</span>`;
+        if(c.unmatched_usdt>0) profitCell+=" ⚠";
+      } else if(c.side==="BUY"&&c.unrealized_profit_idr!=null){
+        const pcls=c.unrealized_profit_idr>=0?"pos":"neg";
+        profitCell=`<span class="${pcls}">~Rp ${fmt(Math.round(c.unrealized_profit_idr))}</span>`;
       }
       return `<tr><td>${fmtTime(c.time)}</td><td class="${c.side==='SELL'?'neg':'pos'}">${c.side}</td><td>${c.amount}</td><td>${fmt(c.unit_price)}</td><td>${fmt(c.total)}</td><td>${profitCell}</td></tr>`;
     }).join("");
-  } catch(e){
-    document.getElementById("pnl-summary").textContent = "⚠ " + e;
-  }
+  }catch(e){ document.getElementById("pnl-summary").textContent="⚠ "+e; }
 }
 
-/* ---------- balance (display only — advisor decides the active side now) ---------- */
+/* ---------- balance ---------- */
 async function refreshBalance(){
   try{
-    const r = await fetch("/api/balance");
-    const d = await r.json();
-    if(d.error || d.total_usdt == null){
-      document.getElementById("balance-line").textContent = t("balance_unavailable", {err: d.error ? " ("+d.error.slice(0,60)+")" : ""});
-      return;
-    }
-    document.getElementById("balance-line").textContent =
-      `${Math.round(d.total_usdt)} USDT (spot ${Math.round(d.spot_usdt)} + funding ${Math.round(d.funding_usdt)})`;
-  } catch(e){
-    document.getElementById("balance-line").textContent = t("balance_error", {e});
-  }
+    const r=await fetch("/api/balance");
+    const d=await r.json();
+    if(d.error||d.total_usdt==null){ document.getElementById("balance-line").textContent=t("balance_unavailable",{err:d.error?" ("+d.error.slice(0,60)+")":""}); return; }
+    document.getElementById("balance-line").textContent=`${Math.round(d.total_usdt)} USDT (spot ${Math.round(d.spot_usdt)} + funding ${Math.round(d.funding_usdt)})`;
+  }catch(e){ document.getElementById("balance-line").textContent=t("balance_error",{e}); }
 }
 
-/* ---------- bank balance manual input ---------- */
+/* ---------- bank balance ---------- */
 function renderBankLimitCheck(){
-  const el = document.getElementById("bank-limit-check");
-  if(bankBalanceIdr == null){ el.textContent = ""; return; }
-  if(lastBuyAdMaxLimit == null){
-    el.innerHTML = t("bank_available", {amt: fmt(bankBalanceIdr)});
-    return;
-  }
-  if(lastBuyAdMaxLimit > bankBalanceIdr){
-    el.innerHTML = `<span class="neg">${t("bank_over", {limit: fmt(lastBuyAdMaxLimit), bank: fmt(bankBalanceIdr)})}</span>`;
+  const el=document.getElementById("bank-limit-check");
+  if(bankBalanceIdr==null){ el.textContent=""; return; }
+  if(lastBuyAdMaxLimit==null){ el.innerHTML=t("bank_available",{amt:fmt(bankBalanceIdr)}); return; }
+  if(lastBuyAdMaxLimit>bankBalanceIdr){
+    el.innerHTML=`<span class="neg">${t("bank_over",{limit:fmt(lastBuyAdMaxLimit),bank:fmt(bankBalanceIdr)})}</span>`;
   } else {
-    el.innerHTML = `<span class="pos">${t("bank_ok", {bank: fmt(bankBalanceIdr)})}</span>`;
+    el.innerHTML=`<span class="pos">${t("bank_ok",{bank:fmt(bankBalanceIdr)})}</span>`;
   }
 }
 function renderSuggestedLimits(limits){
-  const el = document.getElementById("suggested-limits");
-  if(!limits){ el.textContent = ""; return; }
-  el.innerHTML = t("suggested_limits", {
-    buyMin: fmt(Math.round(limits.buy_min_idr)), buyMax: fmt(Math.round(limits.buy_max_idr)),
-    sellMin: limits.sell_min_idr != null ? fmt(Math.round(limits.sell_min_idr)) : "—",
-    sellMax: limits.sell_max_idr != null ? fmt(Math.round(limits.sell_max_idr)) : "—",
+  const el=document.getElementById("suggested-limits");
+  if(!limits){ el.textContent=""; return; }
+  el.innerHTML=t("suggested_limits",{
+    buyMin:fmt(Math.round(limits.buy_min_idr)),buyMax:fmt(Math.round(limits.buy_max_idr)),
+    sellMin:limits.sell_min_idr!=null?fmt(Math.round(limits.sell_min_idr)):"—",
+    sellMax:limits.sell_max_idr!=null?fmt(Math.round(limits.sell_max_idr)):"—",
   });
 }
 async function refreshBankBalance(){
   try{
-    const r = await fetch("/api/bank-balance");
-    const d = await r.json();
-    bankBalanceIdr = d.available_idr;
-    document.getElementById("bank-balance-input").value = Math.round(bankBalanceIdr);
-    renderBankLimitCheck();
-    renderSuggestedLimits(d.suggested_limits);
-  } catch(e){}
+    const r=await fetch("/api/bank-balance");
+    const d=await r.json();
+    bankBalanceIdr=d.available_idr;
+    document.getElementById("bank-balance-input").value=Math.round(bankBalanceIdr);
+    renderBankLimitCheck(); renderSuggestedLimits(d.suggested_limits);
+  }catch(e){}
 }
-document.getElementById("bank-balance-save").addEventListener("click", async () => {
-  const val = parseFloat(document.getElementById("bank-balance-input").value);
-  if(!val || val <= 0) return;
-  const r = await fetch("/api/bank-balance", {
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({available_idr: val}),
-  });
-  const d = await r.json();
-  bankBalanceIdr = val;
-  renderBankLimitCheck();
-  renderSuggestedLimits(d.suggested_limits);
-  refreshWorkSession();
+document.getElementById("bank-balance-save").addEventListener("click",async()=>{
+  const val=parseFloat(document.getElementById("bank-balance-input").value);
+  if(!val||val<=0) return;
+  const r=await fetch("/api/bank-balance",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({available_idr:val})});
+  const d=await r.json();
+  bankBalanceIdr=val; renderBankLimitCheck(); renderSuggestedLimits(d.suggested_limits); refreshWorkSession();
 });
 
-/* ---------- working session — marked every time the bank balance changes ---------- */
+/* ---------- work session ---------- */
 async function refreshWorkSession(){
   try{
-    const r = await fetch("/api/work-sessions");
-    const d = await r.json();
-    const s = d.current;
-    const startedTime = new Date(s.started_at * 1000).toLocaleString(lang === "ru" ? "ru-RU" : "en-GB");
-    const cls = s.realized_pnl_idr >= 0 ? "pos" : "neg";
-    const pnlSpan = `<span class="${cls}">Rp ${fmt(Math.round(s.realized_pnl_idr))}</span>`;
-    let html = t("session_started", {time: startedTime, opening: fmt(Math.round(s.opening_balance_idr))});
-    html += "<br>" + t("session_earned", {pnl: pnlSpan, cycles: s.matched_cycles});
-    if(s.open_usdt > 0){
-      html += "<br>" + t("session_open", {usdt: s.open_usdt.toFixed(0), price: fmt(s.open_avg_cost_idr)});
-    }
-    document.getElementById("session-line").innerHTML = html;
-  } catch(e){
-    document.getElementById("session-line").textContent = "⚠ " + e;
-  }
+    const r=await fetch("/api/work-sessions");
+    const d=await r.json();
+    const s=d.current;
+    const startedTime=new Date(s.started_at*1000).toLocaleString(lang==="ru"?"ru-RU":"en-GB");
+    const cls=s.realized_pnl_idr>=0?"pos":"neg";
+    const pnlSpan=`<span class="${cls}">Rp ${fmt(Math.round(s.realized_pnl_idr))}</span>`;
+    let html=t("session_started",{time:startedTime,opening:fmt(Math.round(s.opening_balance_idr))});
+    html+="<br>"+t("session_earned",{pnl:pnlSpan,cycles:s.matched_cycles});
+    if(s.open_usdt>0) html+="<br>"+t("session_open",{usdt:s.open_usdt.toFixed(0),price:fmt(s.open_avg_cost_idr)});
+    document.getElementById("session-line").innerHTML=html;
+  }catch(e){ document.getElementById("session-line").textContent="⚠ "+e; }
 }
 
-/* ---------- pending orders (someone took an ad - 15min to pay) ---------- */
-let openOrderAlerts = [];  // orders we've already shown, so reloading the page doesn't re-list stale ones forever
-let lastPendingCount = 0;  // read by refreshOrderWatch() to flag "on · order in payment window"
+/* ---------- pending orders ---------- */
+let openOrderAlerts=[];
+let lastPendingCount=0;
 async function refreshPendingOrders(){
   try{
-    const r = await fetch("/api/pending-orders");
-    const d = await r.json();
-    lastPendingCount = d.pending_count || 0;
-    if(d.new_orders && d.new_orders.length){
-      openOrderAlerts = openOrderAlerts.concat(d.new_orders);
-      playOrderAlertSound();
-    }
-    const el = document.getElementById("order-alert");
-    if(openOrderAlerts.length === 0){ el.classList.remove("show"); el.innerHTML = ""; return; }
+    const r=await fetch("/api/pending-orders");
+    const d=await r.json();
+    lastPendingCount=d.pending_count||0;
+    if(d.new_orders&&d.new_orders.length){ openOrderAlerts=openOrderAlerts.concat(d.new_orders); playOrderAlertSound(); }
+    const el=document.getElementById("order-alert");
+    if(openOrderAlerts.length===0){ el.classList.remove("show"); el.innerHTML=""; return; }
     el.classList.add("show");
-    let html = `<div>${t("order_alert_title")} <span style="float:right;cursor:pointer;opacity:.7" id="order-alert-dismiss">✕</span></div>`;
-    for(const o of openOrderAlerts){
-      html += `<div class="oa-row">${t("order_alert_row", {type: o.type_date, amount: o.amount, price: o.price, counterparty: o.counterparty})}</div>`;
-    }
-    el.innerHTML = html;
-    document.getElementById("order-alert-dismiss").addEventListener("click", () => {
-      openOrderAlerts = [];
-      el.classList.remove("show");
-      el.innerHTML = "";
-    });
-  } catch(e){}
+    let html=`<div>${t("order_alert_title")} <span style="float:right;cursor:pointer;opacity:.7" id="order-alert-dismiss">✕</span></div>`;
+    for(const o of openOrderAlerts) html+=`<div class="oa-row">${t("order_alert_row",{type:o.type_date,amount:o.amount,price:o.price,counterparty:o.counterparty})}</div>`;
+    el.innerHTML=html;
+    document.getElementById("order-alert-dismiss").addEventListener("click",()=>{ openOrderAlerts=[]; el.classList.remove("show"); el.innerHTML=""; });
+  }catch(e){}
 }
 
 /* ---------- price chart ---------- */
-const CHART_COLORS = {
-  buy:  { line: "#2de2c5", fill: "rgba(45,226,197,.08)" },  // cyan  — sell-side (buy ads = where you sell)
-  sell: { line: "#ffb300", fill: "rgba(255,179,0,.06)"  },  // amber — buy-side (sell ads = where you buy)
-  be:   "#ff3b4e",                                           // red   — breakeven floor
+const CHART_COLORS={
+  buy:{line:"#2de2c5",fill:"rgba(45,226,197,.08)"},
+  sell:{line:"#ffb300",fill:"rgba(255,179,0,.06)"},
+  be:"#ff3b4e",
 };
-
-function drawPriceChart(points, breakeven){
-  const canvas = document.getElementById("price-chart");
-  const empty  = document.getElementById("chart-empty");
-  if(!points || points.length < 2){
-    canvas.style.display = "none"; empty.style.display = "block"; return;
-  }
-  canvas.style.display = "block"; empty.style.display = "none";
-
-  // HiDPI
-  const rect  = canvas.getBoundingClientRect();
-  const dpr   = window.devicePixelRatio || 1;
-  canvas.width  = rect.width  * dpr;
-  canvas.height = rect.height * dpr;
-  const ctx = canvas.getContext("2d");
-  ctx.scale(dpr, dpr);
-  const W = rect.width, H = rect.height;
-  const PAD = { top: 10, right: 58, bottom: 22, left: 6 };
-  const cW = W - PAD.left - PAD.right;
-  const cH = H - PAD.top  - PAD.bottom;
-
-  // Price range — include breakeven so it's never clipped
-  const allPrices = points.flatMap(p => [p.buy, p.sell].filter(Boolean));
+function drawPriceChart(points,breakeven){
+  const canvas=document.getElementById("price-chart");
+  const empty=document.getElementById("chart-empty");
+  if(!points||points.length<2){ canvas.style.display="none"; empty.style.display="block"; return; }
+  canvas.style.display="block"; empty.style.display="none";
+  const rect=canvas.getBoundingClientRect();
+  const dpr=window.devicePixelRatio||1;
+  canvas.width=rect.width*dpr; canvas.height=rect.height*dpr;
+  const ctx=canvas.getContext("2d");
+  ctx.scale(dpr,dpr);
+  const W=rect.width,H=rect.height;
+  const PAD={top:10,right:58,bottom:22,left:6};
+  const cW=W-PAD.left-PAD.right, cH=H-PAD.top-PAD.bottom;
+  const allPrices=points.flatMap(p=>[p.buy,p.sell].filter(Boolean));
   if(breakeven) allPrices.push(breakeven);
-  let lo = Math.min(...allPrices), hi = Math.max(...allPrices);
-  const pad = Math.max((hi - lo) * 0.15, 5);
-  lo -= pad; hi += pad;
-
-  const tMin = points[0].t, tMax = points[points.length - 1].t;
-  const xOf = t  => PAD.left + (t - tMin) / (tMax - tMin || 1) * cW;
-  const yOf = p  => PAD.top  + (1 - (p - lo) / (hi - lo)) * cH;
-
-  // Background
-  ctx.clearRect(0, 0, W, H);
-
-  // Subtle horizontal grid lines
-  ctx.strokeStyle = "rgba(34,40,45,.9)";
-  ctx.lineWidth = 1;
-  const ticks = 4;
-  for(let i = 0; i <= ticks; i++){
-    const y = PAD.top + (cH / ticks) * i;
-    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
-  }
-
-  // Draw a filled area + line for a price series
-  function drawSeries(key, color){
-    const pts = points.filter(p => p[key] != null);
+  let lo=Math.min(...allPrices),hi=Math.max(...allPrices);
+  const pad=Math.max((hi-lo)*0.15,5); lo-=pad; hi+=pad;
+  const tMin=points[0].t,tMax=points[points.length-1].t;
+  const xOf=t=>PAD.left+(t-tMin)/(tMax-tMin||1)*cW;
+  const yOf=p=>PAD.top+(1-(p-lo)/(hi-lo))*cH;
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle="rgba(30,37,48,.9)"; ctx.lineWidth=1;
+  for(let i=0;i<=4;i++){ const y=PAD.top+(cH/4)*i; ctx.beginPath(); ctx.moveTo(PAD.left,y); ctx.lineTo(W-PAD.right,y); ctx.stroke(); }
+  function drawSeries(key,color){
+    const pts=points.filter(p=>p[key]!=null);
     if(!pts.length) return;
     ctx.beginPath();
-    pts.forEach((p, i) => i === 0 ? ctx.moveTo(xOf(p.t), yOf(p[key])) : ctx.lineTo(xOf(p.t), yOf(p[key])));
-    // fill down to bottom
-    ctx.lineTo(xOf(pts[pts.length-1].t), PAD.top + cH);
-    ctx.lineTo(xOf(pts[0].t), PAD.top + cH);
-    ctx.closePath();
-    ctx.fillStyle = color.fill;
-    ctx.fill();
+    pts.forEach((p,i)=>i===0?ctx.moveTo(xOf(p.t),yOf(p[key])):ctx.lineTo(xOf(p.t),yOf(p[key])));
+    ctx.lineTo(xOf(pts[pts.length-1].t),PAD.top+cH);
+    ctx.lineTo(xOf(pts[0].t),PAD.top+cH);
+    ctx.closePath(); ctx.fillStyle=color.fill; ctx.fill();
     ctx.beginPath();
-    pts.forEach((p, i) => i === 0 ? ctx.moveTo(xOf(p.t), yOf(p[key])) : ctx.lineTo(xOf(p.t), yOf(p[key])));
-    ctx.strokeStyle = color.line;
-    ctx.lineWidth = 1.5;
-    ctx.lineJoin = "round";
-    ctx.stroke();
+    pts.forEach((p,i)=>i===0?ctx.moveTo(xOf(p.t),yOf(p[key])):ctx.lineTo(xOf(p.t),yOf(p[key])));
+    ctx.strokeStyle=color.line; ctx.lineWidth=1.5; ctx.lineJoin="round"; ctx.stroke();
   }
-
-  drawSeries("sell", CHART_COLORS.sell);
-  drawSeries("buy",  CHART_COLORS.buy);
-
-  // Breakeven line
-  if(breakeven && breakeven >= lo && breakeven <= hi){
-    const y = yOf(breakeven);
-    ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = CHART_COLORS.be;
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right + 4, y); ctx.stroke();
+  drawSeries("sell",CHART_COLORS.sell);
+  drawSeries("buy",CHART_COLORS.buy);
+  if(breakeven&&breakeven>=lo&&breakeven<=hi){
+    const y=yOf(breakeven);
+    ctx.setLineDash([4,4]); ctx.strokeStyle=CHART_COLORS.be; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(PAD.left,y); ctx.lineTo(W-PAD.right+4,y); ctx.stroke();
     ctx.setLineDash([]);
   }
-
-  // Right-side price labels
-  ctx.font = "500 10px 'IBM Plex Mono', monospace";
-  ctx.textAlign = "left";
-  const lastBuy  = points.filter(p => p.buy  != null).at(-1);
-  const lastSell = points.filter(p => p.sell != null).at(-1);
-  const lx = W - PAD.right + 6;
-  if(lastBuy){
-    ctx.fillStyle = CHART_COLORS.buy.line;
-    ctx.fillText(Math.round(lastBuy.buy), lx, yOf(lastBuy.buy) + 4);
-  }
-  if(lastSell){
-    ctx.fillStyle = CHART_COLORS.sell.line;
-    ctx.fillText(Math.round(lastSell.sell), lx, yOf(lastSell.sell) + 4);
-  }
-  if(breakeven && breakeven >= lo && breakeven <= hi){
-    ctx.fillStyle = CHART_COLORS.be;
-    ctx.fillText(Math.round(breakeven), lx, yOf(breakeven) + 4);
-  }
-
-  // Bottom time labels — start and end
-  ctx.fillStyle = "rgba(74,82,90,.9)";
-  ctx.textAlign = "left";
-  ctx.fillText(new Date(tMin*1000).toLocaleTimeString(lang==="ru"?"ru-RU":"en-GB",{hour:"2-digit",minute:"2-digit"}), PAD.left, H - 5);
-  ctx.textAlign = "right";
-  ctx.fillText(new Date(tMax*1000).toLocaleTimeString(lang==="ru"?"ru-RU":"en-GB",{hour:"2-digit",minute:"2-digit"}), W - PAD.right, H - 5);
+  ctx.font="500 10px 'IBM Plex Mono',monospace"; ctx.textAlign="left";
+  const lastBuy=points.filter(p=>p.buy!=null).at(-1);
+  const lastSell=points.filter(p=>p.sell!=null).at(-1);
+  const lx=W-PAD.right+6;
+  if(lastBuy){ ctx.fillStyle=CHART_COLORS.buy.line; ctx.fillText(Math.round(lastBuy.buy),lx,yOf(lastBuy.buy)+4); }
+  if(lastSell){ ctx.fillStyle=CHART_COLORS.sell.line; ctx.fillText(Math.round(lastSell.sell),lx,yOf(lastSell.sell)+4); }
+  if(breakeven&&breakeven>=lo&&breakeven<=hi){ ctx.fillStyle=CHART_COLORS.be; ctx.fillText(Math.round(breakeven),lx,yOf(breakeven)+4); }
+  ctx.fillStyle="rgba(63,75,88,.9)";
+  ctx.textAlign="left"; ctx.fillText(new Date(tMin*1000).toLocaleTimeString(lang==="ru"?"ru-RU":"en-GB",{hour:"2-digit",minute:"2-digit"}),PAD.left,H-5);
+  ctx.textAlign="right"; ctx.fillText(new Date(tMax*1000).toLocaleTimeString(lang==="ru"?"ru-RU":"en-GB",{hour:"2-digit",minute:"2-digit"}),W-PAD.right,H-5);
 }
-
 async function refreshChart(){
   try{
-    const r = await fetch("/api/price-history");
-    const d = await r.json();
-    drawPriceChart(d.points, d.breakeven);
-    // Legend
-    const leg = document.getElementById("chart-legend");
-    const parts = [];
-    if(d.points && d.points.length){
+    const r=await fetch("/api/price-history");
+    const d=await r.json();
+    drawPriceChart(d.points,d.breakeven);
+    const leg=document.getElementById("chart-legend");
+    const parts=[];
+    if(d.points&&d.points.length){
       parts.push(`<span style="color:${CHART_COLORS.buy.line}">${t("chart_buy_label")}</span>`);
       parts.push(`<span style="color:${CHART_COLORS.sell.line}">${t("chart_sell_label")}</span>`);
       if(d.breakeven) parts.push(`<span style="color:${CHART_COLORS.be}">${t("chart_be_label")}</span>`);
     }
-    leg.innerHTML = parts.join(" · ");
-  } catch(e){}
+    leg.innerHTML=parts.join(" · ");
+  }catch(e){}
+}
+window.addEventListener("resize",refreshChart);
+
+/* ---------- agent ---------- */
+let _agentCurrentAction=null;
+let _agentCurrentTitle=null;
+
+function _agentHistoryHtml(history){
+  if(!history||!history.length) return "";
+  return history.slice(0,8).map(h=>{
+    const ts=new Date(h.at*1000);
+    const hm=ts.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+    const icon=h.skipped?"↩":"✓";
+    const cls=h.skipped?"agent-hist-row skipped":"agent-hist-row";
+    return `<div class="${cls}"><span class="h-time">${hm}</span><span class="h-icon">${icon}</span><span>${h.title||h.action}</span></div>`;
+  }).join("");
 }
 
-// Redraw on resize (canvas needs explicit size update)
-window.addEventListener("resize", refreshChart);
+function _applyAgentPayload(d){
+  const ins=d.instruction;
+  _agentCurrentAction=ins.action;
+  _agentCurrentTitle=ins.title;
+  const card=document.getElementById("agent-card");
+  card.classList.remove("urgency-high","urgency-medium","urgency-low");
+  card.classList.add("urgency-"+ins.urgency);
+  const urgencyMap={high:"⚡ СРОЧНО",medium:"●",low:"○"};
+  document.getElementById("agent-urgency-label").textContent=urgencyMap[ins.urgency]||"";
+  document.getElementById("agent-title").textContent=ins.title;
+  document.getElementById("agent-context").textContent=ins.context||"";
+  const stepsEl=document.getElementById("agent-steps");
+  stepsEl.innerHTML=(ins.steps||[]).map(s=>`<li>${s}</li>`).join("");
+  const actionable=["change_price","accept_payment","hold","trade_done"].includes(ins.action);
+  document.getElementById("agent-btns").style.display=actionable?"flex":"none";
+  const hw=document.getElementById("agent-history-wrap");
+  const hl=document.getElementById("agent-history-list");
+  if(d.history&&d.history.length){ hw.style.display="block"; hl.innerHTML=_agentHistoryHtml(d.history); }
+  else { hw.style.display="none"; }
+}
+
+async function refreshAgent(){
+  try{
+    const r=await fetch(`/api/agent?lang=${lang}`);
+    const d=await r.json();
+    _applyAgentPayload(d);
+  }catch(e){ document.getElementById("agent-title").textContent="⚠ "+e; }
+}
+
+async function _agentConfirm(skipped){
+  const doneBtn=document.getElementById("agent-done-btn");
+  const skipBtn=document.getElementById("agent-skip-btn");
+  doneBtn.disabled=true; skipBtn.disabled=true;
+  doneBtn.textContent=skipped?"…":"⏳ Обновляю…";
+  try{
+    const r=await fetch("/api/agent/done",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:_agentCurrentAction,title:_agentCurrentTitle,skipped,lang}),
+    });
+    const d=await r.json();
+    _applyAgentPayload(d);
+    refreshPnl(); refreshEarnings(); refreshWorkSession();
+  }catch(e){ document.getElementById("agent-title").textContent="⚠ "+e; }
+  finally{ doneBtn.disabled=false; skipBtn.disabled=false; doneBtn.textContent="✓ Выполнено"; }
+}
+
+document.getElementById("agent-done-btn").addEventListener("click",()=>_agentConfirm(false));
+document.getElementById("agent-skip-btn").addEventListener("click",()=>_agentConfirm(true));
 
 /* ---------- boot ---------- */
-refreshOrderbook(); refreshAdvice(); refreshEarnings(); refreshPnl(); refreshBalance(); refreshBankBalance(); refreshWorkSession(); refreshAutoReprice(); refreshOrderWatch(); refreshActiveSideOverride(); refreshPendingOrders(); refreshChart();
-setInterval(refreshOrderbook, 4000);
-setInterval(refreshChart, 8000);
-setInterval(refreshAdvice, 10000);
-setInterval(refreshBalance, 60000);
-setInterval(refreshPnl, 90000);
-setInterval(refreshEarnings, 90000);
-setInterval(refreshWorkSession, 90000);
-setInterval(refreshAutoReprice, 15000);
-setInterval(refreshOrderWatch, 15000);
-setInterval(refreshActiveSideOverride, 15000);
-setInterval(refreshPendingOrders, 6000);
+refreshOrderbook(); refreshAdvice(); refreshEarnings(); refreshPnl(); refreshBalance();
+refreshBankBalance(); refreshWorkSession(); refreshAutoReprice(); refreshOrderWatch();
+refreshActiveSideOverride(); refreshPendingOrders(); refreshChart(); refreshAgent();
+
+setInterval(refreshOrderbook,4000);
+setInterval(refreshChart,8000);
+setInterval(refreshAdvice,10000);
+setInterval(refreshBalance,60000);
+setInterval(refreshPnl,90000);
+setInterval(refreshEarnings,90000);
+setInterval(refreshWorkSession,90000);
+setInterval(refreshAutoReprice,15000);
+setInterval(refreshOrderWatch,15000);
+setInterval(refreshActiveSideOverride,15000);
+setInterval(refreshPendingOrders,6000);
+setInterval(refreshAgent,12000);
 </script>
 </body>
 </html>

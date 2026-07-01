@@ -205,6 +205,9 @@ class PnLTracker:
         session_pnl, session_matched, _, session_open_lots = self._fifo_match(session_events)
         session_open_usdt, session_open_avg_cost = self._open_position(session_open_lots)
 
+        open_tracked_max_cost_idr = (
+            max(l["unit_price"] for l in open_lots) if open_lots else None
+        )
         return {
             "total_trades": len(self.cycles),
             "buy_trades": len(buys),
@@ -214,6 +217,7 @@ class PnLTracker:
             "unmatched_sell_usdt": round(unmatched_sell_usdt, 4),
             "open_tracked_usdt": open_tracked_usdt,
             "open_tracked_avg_cost_idr": open_tracked_avg_cost,
+            "open_tracked_max_cost_idr": open_tracked_max_cost_idr,
             "open_sell_remainder_usdt": max(0.0, net),
             "open_buy_surplus_usdt": max(0.0, -net),
             "session_start_ms": session_events[0]["time"] if session_events else None,

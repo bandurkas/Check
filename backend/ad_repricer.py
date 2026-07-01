@@ -17,6 +17,7 @@ index - search lags behind the real price by an unknown amount, so trusting
 "no error was thrown" was the bug that made v1 of this report false
 positives.
 """
+import math
 import time
 
 from playwright.async_api import async_playwright
@@ -105,7 +106,7 @@ class AdRepricer:
                     await page.wait_for_selector('input[name="rate"]', timeout=10000)
                     rate = page.locator('input[name="rate"]')
                     await rate.click()
-                    await rate.fill(str(int(new_price)))
+                    await rate.fill(str(math.ceil(new_price)))
 
                     post_btn = page.get_by_role("button", name="Post", exact=True)
                     for _ in range(15):  # poll instead of a fixed sleep - avoids racing React's state update

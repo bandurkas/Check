@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import subprocess
 import time
 
@@ -23,6 +24,11 @@ PNL_REFRESH_SECONDS = 90
 BALANCE_REFRESH_SECONDS = 60
 DEBT_THRESHOLD_USDT = 1.0  # below this, "open debt" is just rounding noise
 pnl_cache = {"summary": None, "cycles": [], "updated_at": 0, "error": None}
+# Fires when pnl_refresh detects total_trades increased — lets the agent surface
+# "you just made a trade" immediately, before the 90s loop catches up.
+# acknowledged=True until a new trade is detected so the card stays quiet at rest.
+trade_event = {"detected_at": None, "side": None, "amount": None, "price": None,
+               "acknowledged": True, "last_seen_count": 0}
 balance_cache = {"spot_usdt": None, "funding_usdt": None, "total_usdt": None, "updated_at": 0, "error": None}
 # Tracks when the current open rebuy/resell debt first appeared, so the advisor
 # can tell a 5-minute gap from a 3-hour one (ADVISOR_DESIGN.md item 3).
@@ -182,6 +188,18 @@ async def pnl_refresh_loop():
             stdout, stderr = await proc.communicate()
             if proc.returncode == 0:
                 data = json.loads(stdout.decode())
+                new_count = data["summary"].get("total_trades", 0)
+                old_count = trade_event["last_seen_count"]
+                if old_count > 0 and new_count > old_count:
+                    # New trade(s) arrived — find the most recent one to surface
+                    cycles = sorted(data.get("cycles", []), key=lambda c: c["time"], reverse=True)
+                    latest = cycles[0] if cycles else {}
+                    trade_event["detected_at"] = time.time()
+                    trade_event["side"] = latest.get("side")
+                    trade_event["amount"] = latest.get("amount")
+                    trade_event["price"] = latest.get("unit_price")
+                    trade_event["acknowledged"] = False
+                trade_event["last_seen_count"] = new_count
                 pnl_cache["summary"] = data["summary"]
                 pnl_cache["cycles"] = data["cycles"]
                 pnl_cache["updated_at"] = time.time()
@@ -194,6 +212,10 @@ async def pnl_refresh_loop():
         await asyncio.sleep(PNL_REFRESH_SECONDS)
 
 
+PNL_STALE_SECONDS = 300    # 5 min = 3 refresh cycles; stale avg_cost silently bypasses the floor
+MARKET_STALE_SECONDS = 30  # 7-8 poll cycles (4s each); frozen snapshot feeds bad prices to advisor
+
+
 async def auto_reprice_loop():
     """Off by default (repricer.enabled). When on, mirrors exactly what the
     advisor card already tells the user to do by hand - only fires on the
@@ -201,21 +223,31 @@ async def auto_reprice_loop():
     its own separate judgment. AdRepricer enforces the actual safety bounds
     (max delta, cooldown); this loop just decides *whether* to call it.
 
-    Two extra gates beyond repricer.enabled, both added 2026-07-01 after
-    review found has_pending() alone wasn't enough:
+    Gates beyond repricer.enabled (all must pass):
     - order_watch_state["enabled"]: has_pending() only reflects reality while
       something is actively polling for it. If order-watch is off, its last
-      reading is frozen and could be silently stale in either direction -
-      treat "not currently checking" as "can't confirm it's safe", not as
-      "assume nothing pending".
-    - pnl_cache["summary"] is not None: the cost-basis floor (advisor.py)
-      needs real P&L data to protect a SELL price; right after a backend
-      restart there's a gap before the first VPS poll succeeds where this
-      data is None and the floor is a silent no-op. Don't reprice blind."""
+      reading is frozen — treat as "can't confirm safe".
+    - pnl_cache["summary"] is not None AND fresh: the cost-basis floor needs
+      real P&L data. A None summary (post-restart) or stale summary (VPS SSH
+      failing for >5min) both make the floor a silent no-op — confirmed
+      2026-07-01: stale avg_cost 17931 let aggressive_price 17969 slip past
+      a floor that should have blocked it (real avg was 17969, breakeven 18005),
+      causing a -13237 IDR loss from pure commission at cost price.
+    - watcher.latest fresh: frozen market snapshot (CDP offline) feeds the
+      advisor wrong prices; when data restores the jump can trigger aggressive
+      repricing that slips past a temporarily-correct floor."""
     while True:
         try:
-            pnl_ready = pnl_cache["summary"] is not None
-            if repricer.enabled and order_watch_state["enabled"] and pnl_ready and not order_watcher.has_pending():
+            now = time.time()
+            pnl_age = now - pnl_cache.get("updated_at", 0)
+            market_age = now - watcher.latest.timestamp
+            pnl_ready = pnl_cache["summary"] is not None and pnl_age < PNL_STALE_SECONDS
+            market_ready = market_age < MARKET_STALE_SECONDS
+            if not pnl_ready and repricer.enabled:
+                print(f"[auto_reprice] skipping: pnl_cache is {pnl_age:.0f}s stale (limit {PNL_STALE_SECONDS}s)")
+            if not market_ready and repricer.enabled:
+                print(f"[auto_reprice] skipping: market data is {market_age:.0f}s stale (limit {MARKET_STALE_SECONDS}s)")
+            if repricer.enabled and order_watch_state["enabled"] and pnl_ready and market_ready and not order_watcher.has_pending():
                 inputs = _advice_inputs()
                 result = compute_advice(lang="ru", **inputs)
                 my_ad = inputs["my_ad"]
@@ -307,16 +339,21 @@ async def set_active_side(request: Request):
 
 @app.get("/api/auto-reprice")
 async def get_auto_reprice():
+    now = time.time()
+    pnl_age = now - pnl_cache.get("updated_at", 0)
+    market_age = now - watcher.latest.timestamp
     return {
         "enabled": repricer.enabled,
         "max_delta_idr": repricer.max_delta_idr,
         "cooldown_sec": repricer.cooldown_sec,
         "last_result": repricer.last_result,
-        # Mirrors the gates auto_reprice_loop actually checks, so the dashboard
-        # can say *why* "enabled" isn't currently doing anything instead of
-        # looking like it's silently broken (code review finding, 2026-07-01).
         "order_watch_enabled": order_watch_state["enabled"],
-        "pnl_ready": pnl_cache["summary"] is not None,
+        "pnl_ready": pnl_cache["summary"] is not None and pnl_age < PNL_STALE_SECONDS,
+        "pnl_age_sec": round(pnl_age),
+        "pnl_stale": pnl_age >= PNL_STALE_SECONDS,
+        "market_ready": market_age < MARKET_STALE_SECONDS,
+        "market_age_sec": round(market_age),
+        "market_stale": market_age >= MARKET_STALE_SECONDS,
         "has_pending_order": order_watcher.has_pending(),
         "market_above_breakeven": _market_above_breakeven(),
     }
@@ -528,8 +565,9 @@ def _advice_inputs():
         "market_speed_idr_per_min": market_speed,
         "market_trend_idr_per_min": market_trend,
         # Cost-basis floor (advisor.py) - never recommend selling currently-held
-        # inventory below what we actually paid for it.
+        # inventory below what we actually paid for it (per most expensive lot).
         "own_avg_cost_idr": pnl_summary.get("open_tracked_avg_cost_idr"),
+        "own_max_cost_idr": pnl_summary.get("open_tracked_max_cost_idr"),
         "own_open_usdt": pnl_summary.get("open_tracked_usdt"),
     }
 
@@ -560,6 +598,224 @@ async def advice(lang: str = "ru"):
         result["market_against"] = market_trend > TREND_AGAINST_IDR_PER_MIN
         result["market_direction"] = "up" if market_trend > 0 else ("down" if market_trend < 0 else "flat")
     return result
+
+
+# ---------------------------------------------------------------------------
+# Rule-based agent — maps current advisor state to one concrete human action.
+# LLM-ready: swap _build_instruction() body for a Claude API call later;
+# the endpoint contract (/api/agent, /api/agent/done) stays identical.
+# ---------------------------------------------------------------------------
+
+agent_history: list[dict] = []   # newest first, capped at 30
+_AGENT_HISTORY_MAX = 30
+
+
+async def _force_pnl_refresh():
+    """Immediate VPS poll outside the 90-second loop — called after the user
+    confirms an action so the next instruction sees up-to-date P&L."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ssh", VPS_HOST, "cd /root && python3 pnl_remote.py",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode == 0:
+            data = json.loads(stdout.decode())
+            pnl_cache["summary"] = data["summary"]
+            pnl_cache["cycles"] = data["cycles"]
+            pnl_cache["updated_at"] = time.time()
+            pnl_cache["error"] = None
+            _update_debt_state(data["summary"])
+    except Exception:
+        pass  # non-fatal; regular loop retries in ≤90s
+
+
+def _build_instruction(advice: dict, inputs: dict, pending_orders: list) -> dict:
+    """Single most-important instruction for the operator right now.
+
+    Returns a dict:
+      action   – machine key (change_price | accept_payment | wait | hold | auto_working)
+      urgency  – "high" | "medium" | "low"
+      title    – one-liner shown in the card header
+      context  – why (reasons / numbers)
+      steps    – list[str] of concrete things to do; empty when action==wait
+      price    – recommended price or None
+    """
+    state = advice["state"]
+    rec = advice.get("recommended_price")
+    active_side = inputs["active_side"]
+    my_ad = inputs["my_ad"]
+    current_price = my_ad["price"] if my_ad else None
+    ad_type = active_side          # "BUY" or "SELL"
+    context_text = " · ".join(advice.get("reasons") or [advice.get("advice", "")])
+
+    # 1. Pending order → absolute priority regardless of everything else
+    if pending_orders:
+        n = len(pending_orders)
+        extra = f" (+{n - 1} ещё)" if n > 1 else ""
+        return {
+            "action": "accept_payment",
+            "urgency": "high",
+            "title": f"Прими платёж{extra}",
+            "context": "Входящий ордер — у тебя 15 минут на подтверждение получения",
+            "steps": [
+                "Открой Binance P2P → Orders",
+                "Убедись что деньги пришли на банковский счёт",
+                "Нажми «Confirm Release» в Binance",
+                "Вернись и нажми «Выполнено»",
+            ],
+            "price": None,
+        }
+
+    # 2. Recent unacknowledged trade — surface immediately so user knows to act
+    TRADE_EVENT_TTL = 180  # show for 3 min after detection; stale after that
+    if (not trade_event["acknowledged"]
+            and trade_event["detected_at"]
+            and (time.time() - trade_event["detected_at"]) < TRADE_EVENT_TTL):
+        side = trade_event["side"] or "?"
+        amt = f"{trade_event['amount']:.0f}" if trade_event["amount"] else "?"
+        px = f"{trade_event['price']:.0f}" if trade_event["price"] else "?"
+        next_side = "SELL" if side == "BUY" else "BUY"
+        return {
+            "action": "trade_done",
+            "urgency": "high",
+            "title": f"Сделка {side}: {amt} USDT по {px} — подтверди",
+            "context": f"Новая {side}-сделка зафиксирована в P&L. Нажми «Выполнено» чтобы обновить данные и получить следующий шаг ({next_side}).",
+            "steps": [
+                f"Убедись что Binance P2P показывает сделку завершённой",
+                f"Нажми «Выполнено» — система переключится на {next_side}",
+            ],
+            "price": None,
+        }
+
+    # 3. Floor: market at/below cost — hold, do not lower
+    if state == "floor":
+        floor_price = math.ceil(rec) if rec else None
+        return {
+            "action": "hold",
+            "urgency": "medium",
+            "title": f"Держи цену {floor_price} — у безубытка, не снижай",
+            "context": context_text,
+            "steps": [
+                "Ничего не менять — ждать отскока рынка вверх",
+                f"Минимальная цена продажи: {floor_price} IDR",
+            ],
+            "price": floor_price,
+        }
+
+    # 3. Wide spread: best to wait
+    if state == "wide":
+        return {
+            "action": "wait",
+            "urgency": "low",
+            "title": "Жди — спред широкий, позиция стоит хорошо",
+            "context": context_text,
+            "steps": [],
+            "price": rec,
+        }
+
+    # 4. Price change needed
+    if state in ("push", "trend", "debt", "tight", "neutral") and rec is not None:
+        target = math.ceil(rec)
+        delta = (target - current_price) if current_price else None
+        delta_str = f" ({delta:+.0f})" if delta is not None else ""
+        current_str = f"{current_price:.0f} → " if current_price else ""
+        urgency = "high" if state in ("push", "trend") else "medium"
+
+        # If auto-reprice is on and healthy, nothing for the user to do
+        now = time.time()
+        pnl_age = now - pnl_cache.get("updated_at", 0)
+        market_age = now - watcher.latest.timestamp
+        auto_healthy = (repricer.enabled
+                        and order_watch_state["enabled"]
+                        and pnl_age < PNL_STALE_SECONDS
+                        and market_age < MARKET_STALE_SECONDS)
+        if auto_healthy and delta and abs(delta) >= 1:
+            return {
+                "action": "auto_working",
+                "urgency": "low",
+                "title": f"Авто-репрайс: {current_str}{target}{delta_str}",
+                "context": f"Бот сделает это сам в течение ~{AUTO_REPRICE_INTERVAL_SECONDS}с · {context_text}",
+                "steps": [],
+                "price": target,
+            }
+
+        if current_price and abs(target - current_price) < 1:
+            return {
+                "action": "wait",
+                "urgency": "low",
+                "title": f"Цена актуальна ({current_price:.0f}) — ждём исполнения",
+                "context": context_text,
+                "steps": [],
+                "price": target,
+            }
+
+        return {
+            "action": "change_price",
+            "urgency": urgency,
+            "title": f"Измени цену: {current_str}{target}{delta_str} IDR",
+            "context": context_text,
+            "steps": [
+                "Binance P2P → My Ads",
+                f"Найди свою {ad_type} заявку",
+                f"Нажми Edit → поставь цену {target} IDR",
+                "Нажми Post → Confirm to post",
+                "Нажми «Выполнено» когда готово",
+            ],
+            "price": target,
+        }
+
+    # 5. Fallback: neutral / no clear signal
+    return {
+        "action": "wait",
+        "urgency": "low",
+        "title": "Нейтрально — наблюдай",
+        "context": context_text or "Нет доминирующего сигнала",
+        "steps": [],
+        "price": rec,
+    }
+
+
+def _agent_payload(lang: str = "ru") -> dict:
+    inputs = _advice_inputs()
+    advice = compute_advice(lang=lang, **inputs)
+    pending = list(order_watcher.seen_order_numbers)  # proxy: count of open orders
+    pending_orders = [{"id": oid} for oid in pending] if order_watcher.has_pending() else []
+    instruction = _build_instruction(advice, inputs, pending_orders)
+    return {
+        "instruction": instruction,
+        "advice_state": advice["state"],
+        "history": agent_history[:10],
+    }
+
+
+@app.get("/api/agent")
+async def get_agent(lang: str = "ru"):
+    return _agent_payload(lang)
+
+
+@app.post("/api/agent/done")
+async def agent_done(request: Request):
+    body = await request.json()
+    action = body.get("action", "unknown")
+    title = body.get("title", "")
+    skipped = bool(body.get("skipped", False))
+    lang = body.get("lang", "ru")
+    agent_history.insert(0, {
+        "action": action,
+        "title": title,
+        "skipped": skipped,
+        "at": time.time(),
+    })
+    if len(agent_history) > _AGENT_HISTORY_MAX:
+        agent_history.pop()
+    # Acknowledging a trade_done event: just clear the notification.
+    # Do NOT touch the side override — user manages that manually.
+    if action == "trade_done" and not skipped:
+        trade_event["acknowledged"] = True
+    await _force_pnl_refresh()
+    return _agent_payload(lang)
 
 
 @app.get("/", response_class=HTMLResponse)
