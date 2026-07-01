@@ -219,12 +219,12 @@ footer{font-family:var(--mono);font-size:10px;color:var(--faint);text-align:cent
       <span class="agent-urgency" id="agent-urgency-label">—</span>
     </div>
     <div id="agent-title">Загрузка…</div>
-    <div id="agent-context"></div>
-    <ol id="agent-steps"></ol>
     <div class="agent-btns" id="agent-btns" style="display:none">
       <button class="btn-done" id="agent-done-btn">✓ Выполнено</button>
       <button class="btn-skip" id="agent-skip-btn">Пропустить</button>
     </div>
+    <div id="agent-context"></div>
+    <ol id="agent-steps"></ol>
     <div class="agent-hist-wrap" id="agent-history-wrap" style="display:none">
       <div class="agent-hist-label">История</div>
       <div class="agent-hist-list" id="agent-history-list"></div>
@@ -903,6 +903,18 @@ window.addEventListener("resize",refreshChart);
 let _agentCurrentAction=null;
 let _agentCurrentTitle=null;
 
+function _beep(){
+  try{
+    const ac=new (window.AudioContext||window.webkitAudioContext)();
+    const osc=ac.createOscillator(); const gain=ac.createGain();
+    osc.connect(gain); gain.connect(ac.destination);
+    osc.type="sine"; osc.frequency.value=880;
+    gain.gain.setValueAtTime(0.4,ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+0.4);
+    osc.start(); osc.stop(ac.currentTime+0.4);
+  }catch(e){}
+}
+
 function _agentHistoryHtml(history){
   if(!history||!history.length) return "";
   return history.slice(0,8).map(h=>{
@@ -916,6 +928,11 @@ function _agentHistoryHtml(history){
 
 function _applyAgentPayload(d){
   const ins=d.instruction;
+  const prevAction=_agentCurrentAction;
+  const ALERT_ACTIONS=["trade_done","accept_payment"];
+  if(ALERT_ACTIONS.includes(ins.action)&&!ALERT_ACTIONS.includes(prevAction)){
+    _beep();
+  }
   _agentCurrentAction=ins.action;
   _agentCurrentTitle=ins.title;
   const card=document.getElementById("agent-card");
@@ -972,9 +989,9 @@ setInterval(refreshOrderbook,4000);
 setInterval(refreshChart,8000);
 setInterval(refreshAdvice,10000);
 setInterval(refreshBalance,60000);
-setInterval(refreshPnl,90000);
-setInterval(refreshEarnings,90000);
-setInterval(refreshWorkSession,90000);
+setInterval(refreshPnl,30000);
+setInterval(refreshEarnings,30000);
+setInterval(refreshWorkSession,30000);
 setInterval(refreshAutoReprice,15000);
 setInterval(refreshOrderWatch,15000);
 setInterval(refreshActiveSideOverride,15000);

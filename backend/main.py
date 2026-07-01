@@ -9,7 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from ad_repricer import AdRepricer
-from advisor import TREND_AGAINST_IDR_PER_MIN, WIDE_SPREAD_PCT, ROUND_TRIP_FEE_PCT, compute_advice
+from advisor import TREND_AGAINST_IDR_PER_MIN, WIDE_SPREAD_PCT, ROUND_TRIP_FEE_PCT
+from advisor_llm import compute_advice_llm as compute_advice
 from market_watcher import MarketWatcher
 from order_watcher import OrderWatcher
 from pnl_tracker import PnLTracker
@@ -20,7 +21,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 watcher = MarketWatcher(poll_interval=4.0)
 
 VPS_HOST = "root@187.127.114.34"
-PNL_REFRESH_SECONDS = 90
+PNL_REFRESH_SECONDS = 30
 BALANCE_REFRESH_SECONDS = 60
 DEBT_THRESHOLD_USDT = 1.0  # below this, "open debt" is just rounding noise
 pnl_cache = {"summary": None, "cycles": [], "updated_at": 0, "error": None}
@@ -58,7 +59,7 @@ AUTO_REPRICE_INTERVAL_SECONDS = 60  # slower cadence on request 2026-07-01 - les
 AUTO_REPRICE_STATES = ("push", "trend", "debt", "tight", "neutral")
 repricer = AdRepricer()  # kill switch off by default - /api/auto-reprice POST to enable
 
-ORDER_WATCH_INTERVAL_SECONDS = 30  # orders have a 15-min payment window, this still gives ~14min worst-case lead
+ORDER_WATCH_INTERVAL_SECONDS = 5  # fast detection: poll every 5s (poll itself takes 5-8s, so ~10-13s real cycle)
 order_watcher = OrderWatcher()
 order_watch_state = {"enabled": True}
 
@@ -669,7 +670,7 @@ def _build_instruction(advice: dict, inputs: dict, pending_orders: list) -> dict
         }
 
     # 2. Recent unacknowledged trade — surface immediately so user knows to act
-    TRADE_EVENT_TTL = 180  # show for 3 min after detection; stale after that
+    TRADE_EVENT_TTL = 600  # show for 10 min after detection; stale after that
     if (not trade_event["acknowledged"]
             and trade_event["detected_at"]
             and (time.time() - trade_event["detected_at"]) < TRADE_EVENT_TTL):
