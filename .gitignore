@@ -7,3 +7,4 @@ node_modules/
 requirements.txt.bak
 scripts/*.log
 backend/withdrawals.json
+backend/armed_state.json

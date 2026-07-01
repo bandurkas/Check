@@ -86,6 +86,41 @@ ORDER_WATCH_INTERVAL_SECONDS = 5  # fast detection: poll every 5s (poll itself t
 order_watcher = OrderWatcher()
 order_watch_state = {"enabled": True}
 
+# The armed state (auto-reprice on/off, order-watch on/off, pinned side) used to
+# live only in memory, so a backend restart — including a silent KeepAlive
+# relaunch after a crash — left the bot disarmed and unable to sell even when the
+# market reached our price, until someone noticed and re-armed by hand. Persist it
+# to disk and reload on startup so a restart resumes exactly where we left off.
+_ARMED_STATE_FILE = os.path.join(os.path.dirname(__file__), "armed_state.json")
+
+
+def _save_armed_state():
+    try:
+        with open(_ARMED_STATE_FILE, "w") as f:
+            json.dump({
+                "auto_reprice": repricer.enabled,
+                "order_watch": order_watch_state["enabled"],
+                "active_side": active_side_state["override"],
+            }, f)
+    except Exception as e:
+        print(f"[armed_state] save failed: {e}")
+
+
+def _load_armed_state():
+    if not os.path.exists(_ARMED_STATE_FILE):
+        return
+    try:
+        with open(_ARMED_STATE_FILE) as f:
+            st = json.load(f)
+        repricer.enabled = bool(st.get("auto_reprice", repricer.enabled))
+        order_watch_state["enabled"] = bool(st.get("order_watch", order_watch_state["enabled"]))
+        side = st.get("active_side")
+        active_side_state["override"] = side if side in ("BUY", "SELL") else None
+        print(f"[armed_state] restored: auto_reprice={repricer.enabled} "
+              f"order_watch={order_watch_state['enabled']} active_side={active_side_state['override']}")
+    except Exception as e:
+        print(f"[armed_state] load failed, using defaults: {e}")
+
 
 def _market_above_breakeven() -> bool:
     """True when the market's best buy price is above our sell breakeven.
@@ -138,6 +173,7 @@ def _orderbook_for_llm() -> dict:
 
 @app.on_event("startup")
 async def startup():
+    _load_armed_state()  # resume armed state from before the last restart
     asyncio.create_task(watcher.run_forever())
     asyncio.create_task(watcher.run_my_ad_forever())
     asyncio.create_task(pnl_refresh_loop())
@@ -162,6 +198,7 @@ async def get_order_watch():
 async def set_order_watch(request: Request):
     body = await request.json()
     order_watch_state["enabled"] = bool(body.get("enabled", False))
+    _save_armed_state()
     return {**order_watch_state, "market_above_breakeven": _market_above_breakeven()}
 
 
@@ -447,6 +484,7 @@ async def set_active_side(request: Request):
     if side not in (None, "BUY", "SELL"):
         return {"error": "override must be null, 'BUY', or 'SELL'"}
     active_side_state["override"] = side
+    _save_armed_state()
     return {"override": active_side_state["override"]}
 
 
@@ -474,6 +512,7 @@ async def get_auto_reprice():
 async def set_auto_reprice(request: Request):
     body = await request.json()
     repricer.enabled = bool(body.get("enabled", False))
+    _save_armed_state()
     return {"enabled": repricer.enabled}
 
 
