@@ -103,6 +103,22 @@ class PnLTracker:
         return (c.get("commission", 0.0) / c["amount"]) * c["unit_price"] if c["amount"] > 1e-9 else 0.0
 
     @staticmethod
+    def _drain_lots(buy_queue, amount):
+        """Remove `amount` of USDT inventory from the front of the FIFO buy
+        queue (oldest lots first), no proceeds and no P&L - a withdrawal
+        consumes lots exactly like a sell, minus the money. Works on both the
+        match and annotate queues (only touches lot["amount"]). Amount beyond
+        the tracked queue was untracked balance and is simply dropped."""
+        remaining = amount
+        while remaining > 1e-9 and buy_queue:
+            lot = buy_queue[0]
+            take = min(remaining, lot["amount"])
+            lot["amount"] -= take
+            remaining -= take
+            if lot["amount"] <= 1e-9:
+                buy_queue.pop(0)
+
+    @staticmethod
     def _fifo_match(events):
         """events: trades sorted by time. True time-respecting FIFO - a SELL can
         only consume BUY lots that happened at or before it, never a later one
@@ -125,17 +141,8 @@ class PnLTracker:
                     "fee_per_unit_idr": PnLTracker._fee_per_unit_idr(c),
                 })
             elif c["side"] == "WITHDRAW":
-                # Remove inventory oldest-first, no proceeds => no realized P&L
-                # and it is not a "matched cycle". Any amount beyond the tracked
-                # queue was untracked balance and is simply dropped.
-                remaining = c["amount"]
-                while remaining > 1e-9 and buy_queue:
-                    lot = buy_queue[0]
-                    take = min(remaining, lot["amount"])
-                    lot["amount"] -= take
-                    remaining -= take
-                    if lot["amount"] <= 1e-9:
-                        buy_queue.pop(0)
+                # Removes inventory but is not a sale: no realized P&L, no matched cycle.
+                PnLTracker._drain_lots(buy_queue, c["amount"])
             else:
                 remaining = c["amount"]
                 sell_unit = c["unit_price"]
@@ -179,14 +186,7 @@ class PnLTracker:
                 row["unmatched_usdt"] = 0.0
                 row["open_usdt"] = 0.0
             elif c["side"] == "WITHDRAW":
-                remaining = c["amount"]
-                while remaining > 1e-9 and buy_queue:
-                    lot = buy_queue[0]
-                    take = min(remaining, lot["amount"])
-                    lot["amount"] -= take
-                    remaining -= take
-                    if lot["amount"] <= 1e-9:
-                        buy_queue.pop(0)
+                PnLTracker._drain_lots(buy_queue, c["amount"])
                 row["profit_idr"] = None
                 row["unmatched_usdt"] = 0.0
                 row["open_usdt"] = 0.0
