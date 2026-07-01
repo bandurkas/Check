@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from ad_repricer import AdRepricer
-from advisor import TREND_AGAINST_IDR_PER_MIN, compute_advice
+from advisor import TREND_AGAINST_IDR_PER_MIN, WIDE_SPREAD_PCT, ROUND_TRIP_FEE_PCT, compute_advice
 from market_watcher import MarketWatcher
 from order_watcher import OrderWatcher
 from pnl_tracker import PnLTracker
@@ -440,18 +440,47 @@ def _advice_inputs():
 
     snap = watcher.latest
     rec = snap.recommended_prices()
-    AGGRESSIVE_EXTRA_IDR = 5  # beyond bare top, when speed beats the last few IDR of spread
+    AGGRESSIVE_EXTRA_IDR = 5  # beyond rank-1, when speed beats the last few IDR of spread
     velocity_side = "buy" if active_side == "SELL" else "sell"
-    if active_side == "SELL":
-        baseline_price = rec.get("sell_usdt_at")
-        aggressive_price = snap.robust_buy_price - AGGRESSIVE_EXTRA_IDR if snap.robust_buy_price is not None else None
-    else:
-        baseline_price = rec.get("buy_usdt_at")
-        aggressive_price = snap.robust_sell_price + AGGRESSIVE_EXTRA_IDR if snap.robust_sell_price is not None else None
-    market_trend = watcher.price_trend_idr_per_min(velocity_side)
-    market_speed = abs(market_trend) if market_trend is not None else None
 
     pnl_summary = pnl_cache.get("summary") or {}
+    own_avg_cost = pnl_summary.get("open_tracked_avg_cost_idr")
+    own_open_usdt = pnl_summary.get("open_tracked_usdt")
+    has_position = own_open_usdt is not None and own_open_usdt > 1
+    # Minimum SELL price to recover cost + both legs of Binance's ~0.1% commission.
+    # Used to decide whether rank-5 pricing is still profitable before committing to it.
+    sell_breakeven = (own_avg_cost * (1 + ROUND_TRIP_FEE_PCT / 100)
+                      if has_position and own_avg_cost else None)
+
+    if active_side == "SELL":
+        rank1_price = rec.get("sell_usdt_at")       # buy_ads[0] - 1 tick (cheapest ask, rank 1)
+        rank5_price = snap.rank5_sell_price()        # buy_ads[4] (most expensive still in top-5)
+        # Wide spread + rank-5 still above breakeven: capture extra margin by sitting at
+        # rank 5 instead of racing to rank 1. Urgent states (trend, debt) use aggressive_price
+        # instead of baseline anyway, so this only affects push/neutral/wide/tight branches.
+        wide_spread = snap.spread_pct is not None and snap.spread_pct > WIDE_SPREAD_PCT
+        rank5_profitable = rank5_price is not None and (sell_breakeven is None or rank5_price > sell_breakeven)
+        if wide_spread and rank5_profitable:
+            baseline_price = rank5_price
+        else:
+            baseline_price = rank1_price
+        aggressive_price = (snap.robust_buy_price - AGGRESSIVE_EXTRA_IDR
+                            if snap.robust_buy_price is not None else None)
+    else:
+        rank1_price = rec.get("buy_usdt_at")        # sell_ads[0] + 1 tick (highest bid, rank 1)
+        rank5_price = snap.rank5_buy_price()         # sell_ads[4] (lowest bid still in top-5)
+        # Wide spread: lower acquisition cost by posting at rank-5 price instead of
+        # outbidding to rank 1. Lower buy price → lower future sell breakeven → more margin.
+        wide_spread = snap.spread_pct is not None and snap.spread_pct > WIDE_SPREAD_PCT
+        if wide_spread and rank5_price is not None:
+            baseline_price = rank5_price
+        else:
+            baseline_price = rank1_price
+        aggressive_price = (snap.robust_sell_price + AGGRESSIVE_EXTRA_IDR
+                            if snap.robust_sell_price is not None else None)
+
+    market_trend = watcher.price_trend_idr_per_min(velocity_side)
+    market_speed = abs(market_trend) if market_trend is not None else None
 
     return {
         "active_side": active_side,

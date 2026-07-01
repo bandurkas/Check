@@ -84,6 +84,24 @@ class OrderBookSnapshot:
             rec["buy_usdt_at"] = self.robust_sell_price + TICK
         return rec
 
+    def rank5_sell_price(self):
+        """Highest price still in top-5 for SELL side.
+        buy_ads are sorted ascending (cheapest seller = rank 1); the 5th entry
+        is the most expensive seller still in the visible top-5. Posting at
+        this price puts us at rank 5 — still visible, maximum margin."""
+        ads = self.buy_ads
+        entry = ads[4] if len(ads) >= 5 else (ads[-1] if ads else None)
+        return entry["price"] if entry else None
+
+    def rank5_buy_price(self):
+        """Lowest price still in top-5 for BUY side.
+        sell_ads are sorted descending (highest bidder = rank 1); the 5th entry
+        is the lowest bidder still in top-5. Posting at this price puts us at
+        rank 5 — still visible, minimum acquisition cost."""
+        ads = self.sell_ads
+        entry = ads[4] if len(ads) >= 5 else (ads[-1] if ads else None)
+        return entry["price"] if entry else None
+
 
 class MarketWatcher:
     def __init__(self, poll_interval: float = 4.0):
